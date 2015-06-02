@@ -98,7 +98,7 @@ SYS_MODULE_STOP(wwwd_stop);
 #define PS2_CLASSIC_ISO_PATH     "/dev_hdd0/game/PS2U10000/USRDIR/ISO.BIN.ENC"
 #define PS2_CLASSIC_ISO_ICON     "/dev_hdd0/game/PS2U10000/ICON0.PNG"
 
-#define WM_VERSION			"1.41.41 MOD"						// webMAN version
+#define WM_VERSION			"1.42 MOD"							// webMAN version
 #define MM_ROOT_STD			"/dev_hdd0/game/BLES80608/USRDIR"	// multiMAN root folder
 #define MM_ROOT_SSTL		"/dev_hdd0/game/NPEA00374/USRDIR"	// multiman SingStar® Stealth root folder
 #define MM_ROOT_STL			"/dev_hdd0/tmp/game_repo/main"		// stealthMAN root folder
@@ -3495,6 +3495,7 @@ static void detect_firmware(void)
 
 	dex_mode=0;
 
+	if(peekq(0x80000000002ED818ULL)==CEX) {SYSCALL_TABLE = SYSCALL_TABLE_475;  c_firmware=4.75f;}				else
 	if(peekq(0x80000000002ED778ULL)==CEX) {SYSCALL_TABLE = SYSCALL_TABLE_470;  c_firmware=4.70f;}				else
 	if(peekq(0x800000000030F240ULL)==DEX) {SYSCALL_TABLE = SYSCALL_TABLE_470D; c_firmware=4.70f; dex_mode=2;}	else
 	if(peekq(0x80000000002ED860ULL)==CEX) {SYSCALL_TABLE = SYSCALL_TABLE_465;  c_firmware=(peekq(0x80000000002FC938ULL)==0x323031342F31312FULL)?4.66f:4.65f;} else
@@ -3544,7 +3545,8 @@ static void detect_firmware(void)
 		if(c_firmware==4.60f) {base_addr=0x2D88D0; open_hook=0x2A02BC;} else
 		if(c_firmware==4.65f) {base_addr=0x2D88E0; open_hook=0x2A02C8;} else
 		if(c_firmware==4.66f) {base_addr=0x2D88E0; open_hook=0x2A02C8;} else
-		if(c_firmware==4.70f) {base_addr=0x2D8A70; open_hook=0x2975C0;}
+		if(c_firmware==4.70f) {base_addr=0x2D8A70; open_hook=0x2975C0;} else
+		if(c_firmware==4.75f) {base_addr=0x2D8AF0; open_hook=0x297638;}
 	}
 	else
 	{   // DEX
@@ -3570,9 +3572,9 @@ static void detect_firmware(void)
 
 	if(!dex_mode)
 	{
-		if(c_firmware>=4.55f && c_firmware<=4.70f)
+		if(c_firmware>=4.55f && c_firmware<=4.75f)
 		{
-			get_fan_policy_offset=0x8000000000009E38ULL; // sys 409 get_fan_policy  4.55/4.60/4.65/4.70
+			get_fan_policy_offset=0x8000000000009E38ULL; // sys 409 get_fan_policy  4.55/4.60/4.65/4.70/4.75
 			set_fan_policy_offset=0x800000000000A334ULL; // sys 389 set_fan_policy
 
 			// idps / psid cex
@@ -3591,6 +3593,12 @@ static void detect_firmware(void)
 			else if(c_firmware==4.70f)
 			{
 				idps_offset1 = 0x80000000003E2DB0ULL;
+				idps_offset2 = 0x8000000000474AF4ULL;
+				psid_offset  = 0x8000000000474B0CULL;
+			}
+			else if(c_firmware==4.75f)
+			{
+				idps_offset1 = 0x80000000003E2FB0ULL;
 				idps_offset2 = 0x8000000000474AF4ULL;
 				psid_offset  = 0x8000000000474B0CULL;
 			}
@@ -3616,7 +3624,7 @@ static void detect_firmware(void)
 	else // DEX
 	if(c_firmware>=4.55f && c_firmware<=4.70f)
 	{
-			get_fan_policy_offset=0x8000000000009EB8ULL; // sys 409 get_fan_policy  4.55/4.60/4.65
+			get_fan_policy_offset=0x8000000000009EB8ULL; // sys 409 get_fan_policy  4.55/4.60/4.65/4.70
 			set_fan_policy_offset=0x800000000000A3B4ULL; // sys 389 set_fan_policy
 
 			// idps / psid dex
@@ -4190,7 +4198,7 @@ static bool fix_param_sfo(unsigned char *mem, char *titleID, u8 msg)
 			char version[8];
 			strncpy(version, (char *) &mem[pos], 7);
 			int fw_ver=10000*((version[1] & 0xFF)-'0') + 1000*((version[3] & 0xFF)-'0') + 100*((version[4] & 0xFF)-'0');
-			if((fw_ver>(int)(c_firmware*10000.0f)) && c_firmware>=4.20f && c_firmware<4.70f)
+			if((fw_ver>(int)(c_firmware*10000.0f)) && c_firmware>=4.20f && c_firmware<4.75f)
 			{
 				if(msg) {char text[64]; sprintf(text, "WARNING: Game requires firmware version %i.%i", (fw_ver/10000), (fw_ver-10000*(fw_ver/10000))/100); show_msg((char*)text);}
 
@@ -6735,7 +6743,7 @@ static void setup_form(char *buffer, char *templn)
 #endif
 
 #ifdef FIX_GAME
-	if(c_firmware>=4.20f && c_firmware<4.70f)
+	if(c_firmware>=4.20f && c_firmware<4.75f)
 	{
 		add_check_box("nf", "3", STR_FIXGAME,  " : <select name=\"fm\">", (webman_config->fixgame==FIX_GAME_DISABLED), buffer);
 		add_option_item("0", "Auto"  , (webman_config->fixgame==FIX_GAME_AUTO) , buffer);
@@ -9071,8 +9079,8 @@ static void handleclient(u64 conn_s_p)
 			{   // cobra spoofer not working on 4.53 & 4.65
     			if((c_firmware!=4.53f && c_firmware<4.65f))
 				{
-					cobra_config->spoof_version=0x0470;
-					cobra_config->spoof_revision=64978;
+					cobra_config->spoof_version=0x0475;
+					cobra_config->spoof_revision=65242;
 				}
 			}
 
@@ -13850,6 +13858,32 @@ static bool mount_with_mm(const char *_path0, u8 do_eject)
 			sc_142=0x306618;
 #endif
 		}
+		else
+		if(c_firmware==4.75f)
+		{
+			//patches by deank
+			pokeq(0x800000000026714CULL, 0x4E80002038600000ULL ); // fix 8001003C error  Original: 0x4E8000208003026CULL
+			pokeq(0x8000000000267154ULL, 0x7C6307B44E800020ULL ); // fix 8001003C error  Original: 0x3D6000473D201B43ULL
+			pokeq(0x800000000005658CULL, 0x63FF003D60000000ULL ); // fix 8001003D error  Original: 0x63FF003D419EFFD4ULL
+			pokeq(0x8000000000056650ULL, 0x3FE080013BE00000ULL ); // fix 8001003E error  Original: 0x3FE0800163FF003EULL
+
+			pokeq(0x80000000000565FCULL, 0x419E00D860000000ULL ); // Original: 0x419E00D8419D00C0ULL
+			pokeq(0x8000000000056604ULL, 0x2F84000448000098ULL ); // Original: 0x2F840004409C0048ULL //PATCH_JUMP
+			pokeq(0x800000000005A6E0ULL, 0x2F83000060000000ULL ); // fix 80010009 error  Original: 0x2F830000419E00ACULL
+			pokeq(0x800000000005A6F4ULL, 0x2F83000060000000ULL ); // fix 80010009 error  Original: 0x2F830000419E00ACULL
+
+			pokeq(0x8000000000056230ULL, 0x386000012F830000ULL ); // ignore LIC.DAT check
+			pokeq(0x80000000002275F4ULL, 0x38600000F8690000ULL ); // fix 0x8001002B / 80010017 errors (2015-01-03)
+
+			pokeq(0x8000000000055C5CULL, 0xF821FE917C0802A6ULL ); // just restore the original
+			pokeq(0x8000000000058E1CULL, 0x419E0038E8610098ULL ); // just restore the original
+
+#ifndef COBRA_ONLY
+			sc_600=0x33FF28;
+			sc_604=0x340090;
+			sc_142=0x3066B8;
+#endif
+		}
 	}
 	else
 	{ //DEX
@@ -14822,7 +14856,7 @@ patch:
 			poke_lv1(HV_START_OFFSET_430 + 0x18, 0x65140cd200000000ULL);
 		}
         else
-		if(c_firmware>=4.55f && c_firmware<=4.70f)
+		if(c_firmware>=4.55f && c_firmware<=4.75f)
 		{
 			poke_lv1(HV_START_OFFSET_460 + 0x00, 0x0000000000000001ULL);
 			poke_lv1(HV_START_OFFSET_460 + 0x08, 0xe0d251b556c59f05ULL);
@@ -14832,7 +14866,7 @@ patch:
 
 		if(do_eject) eject_insert(1, 1);
 
-		if(c_firmware>=4.30f && c_firmware<=4.70f)
+		if(c_firmware>=4.30f && c_firmware<=4.75f)
 		{	// add and enable lv2 peek/poke + lv1 peek/poke
 			pokeq(0x800000000000171CULL + 0x00, 0x7C0802A6F8010010ULL);
 			pokeq(0x800000000000171CULL + 0x08, 0x396000B644000022ULL);
@@ -15114,7 +15148,7 @@ patch:
 		sprintf(expplg, "%s/IEXP0_450.BIN", app_sys);
 	else if(c_firmware==4.60f || c_firmware==4.65f || c_firmware==4.66f)
 		sprintf(expplg, "%s/IEXP0_460.BIN", app_sys);
-	else if(c_firmware==4.70f)
+	else if(c_firmware==4.70f || c_firmware==4.75f)
 		sprintf(expplg, "%s/IEXP0_470.BIN", app_sys);
 	else
         sprintf(expplg, "%s/none", app_sys);
@@ -15165,7 +15199,7 @@ exit_mount:
 	}
 
 #ifdef FIX_GAME
-	if(ret && (c_firmware<4.70f) && cellFsOpen("/dev_bdvd/PS3_GAME/PARAM.SFO", CELL_FS_O_RDONLY, &fs, NULL, 0)==CELL_FS_SUCCEEDED)
+	if(ret && (c_firmware<4.75f) && cellFsOpen("/dev_bdvd/PS3_GAME/PARAM.SFO", CELL_FS_O_RDONLY, &fs, NULL, 0)==CELL_FS_SUCCEEDED)
 	{
 		char paramsfo[_4KB_]; unsigned char *mem = (u8*)paramsfo;
 		uint64_t msiz = 0;
