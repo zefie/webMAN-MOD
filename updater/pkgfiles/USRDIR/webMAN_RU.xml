@@ -8,7 +8,7 @@
 				<Pair key="icon"><String>/dev_hdd0/game/XMBMANPLS/USRDIR/IMAGES/multiman.png</String></Pair>
 				<Pair key="icon_notation"><String>WNT_XmbItemBrowser</String></Pair>
 				<Pair key="title"><String>webMAN</String></Pair>
-				<Pair key="info"><String>Функции webMANа</String></Pair>
+				<Pair key="info"><String>Функции webMAN'а</String></Pair>
 				<Pair key="child"><String>segment</String></Pair>
 			</Table>
 		</Attributes>
@@ -54,7 +54,7 @@
 			</Table>
 		</Attributes>
 		<Items>
-			<Query class="type:x-xmb/folder-pixmap" key="nethost_links" attr="nethost_links" src="#seg_webman_nethost_links_items"/>
+			<Query class="type:x-xmb/folder-pixmap" key="nethost_links" attr="nethost_links" src="#seg_webman_nethost_sublinks"/>
 		</Items>
 	</View>
 
@@ -166,8 +166,8 @@
 		<Attributes>
 			<Table key="webman_refresh_xml">
 				<Pair key="icon"><String>/dev_hdd0/game/XMBMANPLS/USRDIR/IMAGES/pkgmanager.png</String></Pair>
-				<Pair key="title"><String>Обновить Мои игры</String></Pair>
-				<Pair key="info"><String>Список игр обновиться после следующей загрузки XMB</String></Pair>
+				<Pair key="title"><String>Обновить 'Мои игры'</String></Pair>
+				<Pair key="info"><String>Список игр обновиться при следующей загрузке XMB</String></Pair>
 				<Pair key="module_name"><String>webbrowser_plugin</String></Pair>
 				<Pair key="module_action"><String>http://localhost/refresh.ps3</String></Pair>
 			</Table>
@@ -180,7 +180,7 @@
 		<Attributes>
 			<Table key="webman_refresh_html">
 				<Pair key="icon"><String>/dev_hdd0/game/XMBMANPLS/USRDIR/IMAGES/pkgmanager.png</String></Pair>
-				<Pair key="title"><String>Обновить Мои игры (HTML)</String></Pair>
+				<Pair key="title"><String>Обновить 'Мои игры' (HTML)</String></Pair>
 				<Pair key="info"><String>Обновить список игр в режиме браузера</String></Pair>
 				<Pair key="module_name"><String>webbrowser_plugin</String></Pair>
 				<Pair key="module_action"><String>http://localhost/index.ps3?html</String></Pair>
