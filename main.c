@@ -98,7 +98,7 @@ SYS_MODULE_STOP(wwwd_stop);
 #define PS2_CLASSIC_ISO_PATH     "/dev_hdd0/game/PS2U10000/USRDIR/ISO.BIN.ENC"
 #define PS2_CLASSIC_ISO_ICON     "/dev_hdd0/game/PS2U10000/ICON0.PNG"
 
-#define WM_VERSION			"1.42.01 MOD"						// webMAN version
+#define WM_VERSION			"1.42.02 zefie-MOD"						// webMAN version
 #define MM_ROOT_STD			"/dev_hdd0/game/BLES80608/USRDIR"	// multiMAN root folder
 #define MM_ROOT_SSTL		"/dev_hdd0/game/NPEA00374/USRDIR"	// multiman SingStar® Stealth root folder
 #define MM_ROOT_STL			"/dev_hdd0/tmp/game_repo/main"		// stealthMAN root folder
@@ -2768,7 +2768,7 @@ static void absPath(char* absPath_s, const char* path, const char* cwd)
 		strcat(absPath_s, path);
 	}
 
-	if(strstr(absPath_s, "/dev_blind") && !isDir("/dev_blind")) enable_dev_blind(NULL);
+	if(strstr(absPath_s, "/dev_blind") && !isDir("/dev_blind") && webman_config->blind) enable_dev_blind(NULL);
 }
 
 static inline uint64_t peekq(uint64_t addr) //lv2
@@ -7151,6 +7151,7 @@ static void game_mount(char *buffer, char *templn, char *param, char *tempstr, u
 								sys_ppu_thread_exit(0);
 							}
 						}
+						if (isDir("/dev_blind") && !webman_config->blind) { system_call_3(SC_FS_UMOUNT, (u64)(char*)"/dev_blind", 0, 1); }
 					}
 					plen=0; //do not copy
 				}
@@ -11451,6 +11452,7 @@ static void poll_thread(uint64_t poll)
 										cellFsRename(PS2_EMU_PATH "ps2_emu.tmp"    , PS2_EMU_PATH "ps2_emu.self");
 									}
 								}
+								if (isDir("/dev_blind") && !webman_config->blind) { system_call_3(SC_FS_UMOUNT, (u64)(char*)"/dev_blind", 0, 1); }
 						}
 #endif //#ifdef COBRA_ONLY
 
@@ -11885,6 +11887,7 @@ static void poll_thread(uint64_t poll)
 
 								reboot=true;
 							}
+							if (isDir("/dev_blind") && !webman_config->blind) { system_call_3(SC_FS_UMOUNT, (u64)(char*)"/dev_blind", 0, 1); }
  #endif //#ifdef REX_ONLY
 						}
 #endif //#ifdef COBRA_ONLY
@@ -11934,6 +11937,7 @@ static void poll_thread(uint64_t poll)
 
 								reboot=true;
 							}
+							if (isDir("/dev_blind") && !webman_config->blind) { system_call_3(SC_FS_UMOUNT, (u64)(char*)"/dev_blind", 0, 1); }
 						}
 						else
 						if(!(webman_config->combo2 & NORMAMODE)
@@ -11982,6 +11986,7 @@ static void poll_thread(uint64_t poll)
 								{system_call_3(SC_FS_UMOUNT, (u64)(char*)"/dev_blind", 0, 1);}
 								break;
 							}
+							if (isDir("/dev_blind") && !webman_config->blind) { sys_timer_sleep(1); system_call_3(SC_FS_UMOUNT, (u64)(char*)"/dev_blind", 0, 1); }
 						}
 						else
 						if(!(webman_config->combo2 & DEBUGMENU)
@@ -12005,7 +12010,7 @@ static void poll_thread(uint64_t poll)
 								cellFsRename(VSH_MODULE_PATH "sysconf_plugin.sprx.cex", VSH_MODULE_PATH "sysconf_plugin.sprx");
 							}
 							sys_timer_sleep(1);
-							{system_call_3(SC_FS_UMOUNT, (u64)(char*)"/dev_blind", 0, 1);}
+							if (isDir("/dev_blind") && !webman_config->blind) {system_call_3(SC_FS_UMOUNT, (u64)(char*)"/dev_blind", 0, 1);}
 						}
 #endif //#ifdef REX_ONLY
 					}
