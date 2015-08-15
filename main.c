@@ -98,7 +98,7 @@ SYS_MODULE_STOP(wwwd_stop);
 #define PS2_CLASSIC_ISO_PATH     "/dev_hdd0/game/PS2U10000/USRDIR/ISO.BIN.ENC"
 #define PS2_CLASSIC_ISO_ICON     "/dev_hdd0/game/PS2U10000/ICON0.PNG"
 
-#define WM_VERSION			"1.42.01 MOD"						// webMAN version
+#define WM_VERSION			"1.42.02 MOD"						// webMAN version
 #define MM_ROOT_STD			"/dev_hdd0/game/BLES80608/USRDIR"	// multiMAN root folder
 #define MM_ROOT_SSTL		"/dev_hdd0/game/NPEA00374/USRDIR"	// multiman SingStar® Stealth root folder
 #define MM_ROOT_STL			"/dev_hdd0/tmp/game_repo/main"		// stealthMAN root folder
@@ -3495,6 +3495,7 @@ static void detect_firmware(void)
 
 	dex_mode=0;
 
+	if(peekq(0x800000000033E720ULL)==DEX) {SYSCALL_TABLE = SYSCALL_TABLE_475D; c_firmware=4.75f; dex_mode=2;}	else
 	if(peekq(0x80000000002ED818ULL)==CEX) {SYSCALL_TABLE = SYSCALL_TABLE_475;  c_firmware=4.75f;}				else
 	if(peekq(0x80000000002ED778ULL)==CEX) {SYSCALL_TABLE = SYSCALL_TABLE_470;  c_firmware=4.70f;}				else
 	if(peekq(0x800000000030F240ULL)==DEX) {SYSCALL_TABLE = SYSCALL_TABLE_470D; c_firmware=4.70f; dex_mode=2;}	else
@@ -3563,7 +3564,8 @@ static void detect_firmware(void)
 	  //if(c_firmware==4.60f) {base_addr=0x??????; open_hook=0x??????;} else
 		if(c_firmware==4.65f) {base_addr=0x2FA230; open_hook=0x2BB010;} else
 		if(c_firmware==4.66f) {base_addr=0x2FA230; open_hook=0x2BB010;} else
-		if(c_firmware==4.70f) {base_addr=0x2FA540; open_hook=0x2B2480;}
+		if(c_firmware==4.70f) {base_addr=0x2FA540; open_hook=0x2B2480;} else
+		if(c_firmware==4.75f) {base_addr=0x2FA5B0; open_hook=0x2B24F8;}
 	}
 
 	base_addr |=0x8000000000000000ULL;
@@ -3622,9 +3624,9 @@ static void detect_firmware(void)
 #endif
 	}
 	else // DEX
-	if(c_firmware>=4.55f && c_firmware<=4.70f)
+	if(c_firmware>=4.55f && c_firmware<=4.75f)
 	{
-			get_fan_policy_offset=0x8000000000009EB8ULL; // sys 409 get_fan_policy  4.55/4.60/4.65/4.70
+			get_fan_policy_offset=0x8000000000009EB8ULL; // sys 409 get_fan_policy  4.55/4.60/4.65/4.70/4.75
 			set_fan_policy_offset=0x800000000000A3B4ULL; // sys 389 set_fan_policy
 
 			// idps / psid dex
@@ -3643,6 +3645,12 @@ static void detect_firmware(void)
 			else if(c_firmware==4.70f)
 			{
 				idps_offset1 = 0x80000000004098B0ULL;
+				idps_offset2 = 0x800000000049CAF4ULL;
+				psid_offset  = 0x800000000049CB0CULL;
+			}
+			else if(c_firmware==4.75f)
+			{
+				idps_offset1 = 0x8000000000409930ULL;
 				idps_offset2 = 0x800000000049CAF4ULL;
 				psid_offset  = 0x800000000049CB0CULL;
 			}
@@ -9076,7 +9084,7 @@ static void handleclient(u64 conn_s_p)
 				cobra_config->spoof_revision=0;
 			}
 			else
-			{   // cobra spoofer not working on 4.53 & 4.65
+			{   // cobra spoofer not working on 4.53+
     			if((c_firmware!=4.53f && c_firmware<4.65f))
 				{
 					cobra_config->spoof_version=0x0475;
@@ -12202,7 +12210,7 @@ static void reset_settings()
 	//webman_config->nopad=0;      //enable all PAD shortcuts
 	//webman_config->nocov=0;      //enable multiMAN covers
 
-	webman_config->fanc=1;       //fan control enabled
+	webman_config->fanc=0;       //fan control disabled
 	//webman_config->temp0=0;      //auto
 	webman_config->temp1=MY_TEMP;
 	webman_config->manu=35;      //manual temp
@@ -14099,6 +14107,32 @@ static bool mount_with_mm(const char *_path0, u8 do_eject)
 			sc_600=0x3647B8; //0x38A368 + 600*8 = 0038B628 -> 80 00 00 00 00 36 47 B8
 			sc_604=0x364890; //0x38A368 + 604*8 = 0038B648 -> 80 00 00 00 00 36 48 90
 			sc_142=0x329190; //0x38A368 + 142*8 = 0038A7D8 -> 80 00 00 00 00 32 91 90
+#endif
+		}
+		else
+		if(c_firmware==4.75f)
+		{
+			// patches by deank ( These patches have been fixed Alexander for 4.75 DEX) 
+			pokeq(0x800000000026D868ULL, 0x4E80002038600000ULL ); // fix 8001003C error  Original: 0x4E8000208003026CULL
+			pokeq(0x800000000026D870ULL, 0x7C6307B44E800020ULL ); // fix 8001003C error  Original: 0x3D6000473D201B43ULL
+			pokeq(0x8000000000059F68ULL, 0x63FF003D60000000ULL ); // fix 8001003D error  Original: 0x63FF003D419EFFD4ULL
+			pokeq(0x800000000005A020ULL, 0x3FE080013BE00000ULL ); // fix 8001003E error  Original: 0x3FE0800163FF003EULL
+
+			pokeq(0x8000000000059FCCULL, 0x419E00D860000000ULL ); // Original: 0x419E00D8419D00C0ULL
+			pokeq(0x8000000000059FD4ULL, 0x2F84000448000098ULL ); // Original: 0x2F840004409C0048ULL //PATCH_JUMP
+			pokeq(0x800000000005E0B0ULL, 0x2F83000060000000ULL ); // fix 80010009 error  Original: 0x2F830000419E00ACULL
+			pokeq(0x800000000005E0C4ULL, 0x2F83000060000000ULL ); // fix 80010009 error  Original: 0x2F830000419E00ACULL
+
+			pokeq(0x8000000000059C00ULL, 0x386000012F830000ULL ); // ignore LIC.DAT check
+			pokeq(0x800000000022DAD0ULL, 0x38600000F8690000ULL ); // fix 0x8001002B / 80010017 errors (2015-08-14)
+
+			pokeq(0x800000000005962CULL, 0xF821FE917C0802A6ULL ); // just restore the original
+			pokeq(0x800000000005C7ECULL, 0x419E0038E8610098ULL ); // just restore the original
+			
+#ifndef COBRA_ONLY
+			sc_600=0x3620D0; //0x38A3E8 + 600*8 = 0038B6A8 -> 80 00 00 00 00 36 20 D0
+			sc_604=0x364920; //0x38A3E8 + 604*8 = 0038B6C8 -> 80 00 00 00 00 36 49 20
+			sc_142=0x329220; //0x38A3E8 + 142*8 = 0038A858 -> 80 00 00 00 00 32 92 20
 #endif
 		}
 	}
