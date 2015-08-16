@@ -4738,13 +4738,15 @@ static void get_default_icon(char *icon, char *param, char *file, int isdir, cha
 		strcpy(icon, wm_icons[5]);
 }
 
-static int get_title_and_id_from_sfo(char *templn, char *tempID, char *entry_name, char *icon, char *data)
+static int get_title_and_id_from_sfo(char *templn, char *tempID, char *entry_name, char *icon, char *data, u8 f0)
 {
-	int fdw, ret = 1;
+	int fdw, ret;
+
+	ret = cellFsOpen(templn, CELL_FS_O_RDONLY, &fdw, NULL, 0);
 
 	templn[0]=0;
 
-	if(cellFsOpen(templn, CELL_FS_O_RDONLY, &fdw, NULL, 0)==CELL_FS_SUCCEEDED)
+	if(ret==CELL_FS_SUCCEEDED)
 	{
 		uint64_t msiz = 0;
 		cellFsLseek(fdw, 0, CELL_FS_SEEK_SET, &msiz);
@@ -4757,16 +4759,14 @@ static int get_title_and_id_from_sfo(char *templn, char *tempID, char *entry_nam
 			parse_param_sfo(mem, tempID, templn);
 			if(!webman_config->nocov) get_cover(icon, tempID);
 		}
-
-		ret = 0;
 	}
 
 	if(!templn[0])
 	{
-		get_name(templn, entry_name, 2); utf8enc(data, templn); //use file name as title
+		get_name(templn, entry_name, 2); if(f0!=NTFS) utf8enc(data, templn); //use file name as title
 	}
 
-	return ret;
+	return ( (ret==CELL_FS_SUCCEEDED) ? 0 : 1 );
 }
 
 static void make_fb_xml(char *myxml)
@@ -4971,7 +4971,7 @@ static int add_net_game(int ns, netiso_read_dir_result_data *data, int v3_entry,
 			cellFsChmod(templn, MODE);
 		}
 
-		get_title_and_id_from_sfo(templn, tempID, data[v3_entry].name, icon, tempstr);
+		get_title_and_id_from_sfo(templn, tempID, data[v3_entry].name, icon, tempstr, 0);
 	}
 	else
 		{get_name(enc_dir_name, data[v3_entry].name, 0); utf8enc(templn, enc_dir_name);}
@@ -5670,7 +5670,7 @@ next_xml_entry:
 							msiz=0;
 							if(!is_iso)
 							{
-                                get_title_and_id_from_sfo(templn, tempID, entry.d_name, icon, tempstr);
+								get_title_and_id_from_sfo(templn, tempID, entry.d_name, icon, tempstr, 0);
 							}
 							else
 							{
@@ -5691,7 +5691,7 @@ next_xml_entry:
 										sprintf(templn, "%s/%s.SFO", param, tempstr);
 									}
 
-									get_title_and_id_from_sfo(templn, tempID, entry.d_name, icon, tempstr);
+									get_title_and_id_from_sfo(templn, tempID, entry.d_name, icon, tempstr, f0);
 								}
 								else
 #endif
@@ -7685,7 +7685,7 @@ next_html_entry:
 										sprintf(templn, "%s/%s.SFO", param, tempstr);
 									}
 
-									if(get_title_and_id_from_sfo(templn, tempID, entry.d_name, icon, tempstr)==1)
+									if(get_title_and_id_from_sfo(templn, tempID, entry.d_name, icon, tempstr, f0)==1)
 									{
 										if( f0!=NTFS ) //get title id from ISO
 										{
@@ -7723,7 +7723,7 @@ next_html_entry:
 							}
 							else
 							{
-								get_title_and_id_from_sfo(templn, tempID, entry.d_name, icon, tempstr);
+								get_title_and_id_from_sfo(templn, tempID, entry.d_name, icon, tempstr, 0);
 							}
 
 							if(!is_iso && f1<2 && (icon[0]==0 || webman_config->nocov)) sprintf(icon, "%s/%s/PS3_GAME/ICON0.PNG", param, entry.d_name);
@@ -15483,6 +15483,7 @@ exit_mount:
 	{
 		if(ret && (strstr(_path, ".PUP.ntfs[BD") || cellFsStat((char*)"/dev_bdvd/PS3UPDAT.PUP", &s)==CELL_FS_SUCCEEDED))
 			sys_map_path((char*)"/dev_bdvd/PS3/UPDATE", (char*)"/dev_bdvd"); //redirect root of bdvd to /dev_bdvd/PS3/UPDATE
+
 		if(ret && (strstr(_path, "/net") && cellFsStat((char*)"/dev_bdvd/PKG", &s)==CELL_FS_SUCCEEDED))
 			sys_map_path((char*)"/app_home", (char*)"/dev_bdvd/PKG"); //redirect net_host/PKG to app_home
 
