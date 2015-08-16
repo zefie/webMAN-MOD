@@ -6884,29 +6884,29 @@ static void setup_form(char *buffer, char *templn)
 	sprintf(templn, "<br> %s: <select name=\"l\">", STR_PLANG); strcat(buffer, templn);
 
 	add_option_item("0" , "English"                                                 , (webman_config->lang==0) , buffer);
-	add_option_item("1" , "Fran\xC3\xA7\x61is"                                      , (webman_config->lang==1) , buffer);
+	add_option_item("1" , "Fran&ccedil;ais"											, (webman_config->lang==1) , buffer);
 	add_option_item("2" , "Italiano"                                                , (webman_config->lang==2) , buffer);
-	add_option_item("3" , "Espa\xC3\xB1ol"                                          , (webman_config->lang==3) , buffer);
+	add_option_item("3" , "Espa&ntilde;ol"											, (webman_config->lang==3) , buffer);
 	add_option_item("4" , "Deutsch"                                                 , (webman_config->lang==4) , buffer);
 	add_option_item("5" , "Nederlands"                                              , (webman_config->lang==5) , buffer);
-	add_option_item("6" , "Portugu\xC3\xAAs"                                        , (webman_config->lang==6) , buffer);
-	add_option_item("7" , "\xD0\xA0\xD1\x83\xD1\x81\xD1\x81\xD0\xBA\xD0\xB8\xD0\xB9", (webman_config->lang==7) , buffer);
+	add_option_item("6" , "Portugu&ecirc;s"											, (webman_config->lang==6) , buffer);
+	add_option_item("7" , "&#1056;&#1091;&#1089;&#1089;&#1082;&#1080;&#1081"		, (webman_config->lang==7) , buffer);
 	add_option_item("8" , "Magyar"                                                  , (webman_config->lang==8) , buffer);
 	add_option_item("9" , "Polski"                                                  , (webman_config->lang==9) , buffer);
-	add_option_item("10", "\xCE\x95\xCE\xBB\xCE\xBB\xCE\xB7\xCE\xBD\xCE\xB9\xCE\xBA\xCF\x8E\xCE\xBD", (webman_config->lang==10), buffer);
+	add_option_item("10", "&Epsilon;&lambda;&lambda;&eta;&nu;&iota;&kappa;&alpha;"	, (webman_config->lang==10), buffer);
 	add_option_item("11", "Hrvatski"                                                , (webman_config->lang==11), buffer);
-	add_option_item("12", "\xD0\xB1\xD1\x8A\xD0\xBB\xD0\xB3\xD0\xB0\xD1\x80\xD1\x81\xD0\xBA\xD0\xB8", (webman_config->lang==12), buffer);
+	add_option_item("12", "&#1041;&#1098;&#1083;&#1075;&#1072;&#1088;&#1089;&#1082;&#1080;", (webman_config->lang==12), buffer);
 	add_option_item("20", "Dansk"                                                   , (webman_config->lang==20), buffer);
 	add_option_item("21", "&#268;e&scaron;tina"                                     , (webman_config->lang==21), buffer);
 	add_option_item("22", "Sloven&#269;ina"                                         , (webman_config->lang==22), buffer);
 
 	add_option_item("13", "Indonesian"												, (webman_config->lang==13), buffer);
-	add_option_item("14", "T\xC3\xBCrk\xC3\xA7\x65"									, (webman_config->lang==14), buffer);
-	add_option_item("15", "\xD8\xA7\xD9\x84\xD8\xB9\xD8\xB1\xD8\xA8\xD9\x8A\xD8\xA9", (webman_config->lang==15), buffer);
-	add_option_item("16", "\xE4\xB8\xAD\xE6\x96\x87"								, (webman_config->lang==16), buffer);
+	add_option_item("14", "T&uuml;rk&ccedil;e"										, (webman_config->lang==14), buffer);
+	add_option_item("15", "&#1575;&#1604;&#1593;&#1585;&#1576;&#1610;&#1577;"		, (webman_config->lang==15), buffer);
+	add_option_item("16", "&#20013;&#25991;"										, (webman_config->lang==16), buffer);
 	add_option_item("19", "&#32321;&#39636;&#20013;&#25991;"						, (webman_config->lang==19), buffer);
-	add_option_item("17", "\xED\x95\x9C\xEA\xB5\xAD\xEC\x96\xB4"					, (webman_config->lang==17), buffer);
-	add_option_item("18", "\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E"					, (webman_config->lang==18), buffer);
+	add_option_item("17", "&#54620;&#44397;&#50612;"								, (webman_config->lang==17), buffer);
+	add_option_item("18", "&#26085;&#26412;&#35486;"								, (webman_config->lang==18), buffer);
 	add_option_item("99", "Unknown"													, (webman_config->lang==99), buffer);
 
 	strcat(buffer, "</select> ");
