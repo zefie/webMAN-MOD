@@ -10076,6 +10076,7 @@ bgm_status:
 					{
 						ps3mapi_vshplugin(buffer, templn, param);
 					}
+					else
 					if(strstr(param,"gameplugin.ps3mapi"))
 					{
 						ps3mapi_gameplugin(buffer, templn, param);
