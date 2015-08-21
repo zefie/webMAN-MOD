@@ -98,7 +98,7 @@ SYS_MODULE_STOP(wwwd_stop);
 #define PS2_CLASSIC_ISO_PATH     "/dev_hdd0/game/PS2U10000/USRDIR/ISO.BIN.ENC"
 #define PS2_CLASSIC_ISO_ICON     "/dev_hdd0/game/PS2U10000/ICON0.PNG"
 
-#define WM_VERSION			"1.42.02 zefie-MOD"						// webMAN version
+#define WM_VERSION			"1.42.03 zefie-MOD"						// webMAN version
 #define MM_ROOT_STD			"/dev_hdd0/game/BLES80608/USRDIR"	// multiMAN root folder
 #define MM_ROOT_SSTL		"/dev_hdd0/game/NPEA00374/USRDIR"	// multiman SingStar® Stealth root folder
 #define MM_ROOT_STL			"/dev_hdd0/tmp/game_repo/main"		// stealthMAN root folder
@@ -191,6 +191,8 @@ SYS_MODULE_STOP(wwwd_stop);
 #define SYS_NET_EURUS_POST_COMMAND		(726)
 #define CMD_GET_MAC_ADDRESS				0x103f
 
+#define SYSCALL8_OPCODE_GET_MAMBA		0x7FFFULL
+
 #define BEEP1 { system_call_3(SC_RING_BUZZER, 0x1004, 0x4,   0x6); }
 #define BEEP2 { system_call_3(SC_RING_BUZZER, 0x1004, 0x7,  0x36); }
 #define BEEP3 { system_call_3(SC_RING_BUZZER, 0x1004, 0xa, 0x1b6); }
@@ -265,6 +267,7 @@ SYS_MODULE_STOP(wwwd_stop);
 #define LINELEN			512 // file listing
 #define MAX_LINE_LEN	640 // html games
 #define MAX_PATH_LEN	512 // do not change!
+#define MAX_XMB_ITEMS	1350
 
 #define FAILED		-1
 
@@ -1029,6 +1032,7 @@ static void detect_firmware(void);
 #ifndef ENGLISH_ONLY
 static bool language(const char *file_str, char *default_str);
 static void update_language(void);
+uint32_t get_xreg_value(char *key, u32 default_value);
 uint32_t get_system_language(uint8_t *lang);
 #endif
 #ifdef REMOVE_SYSCALLS
@@ -2914,10 +2918,11 @@ void toggle_video_rec(void)
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ENGLISH_ONLY
-uint32_t get_system_language(uint8_t *lang)
+
+uint32_t get_xreg_value(char *key, u32 default_value)
 {
 	int reg = -1;
-	u32 val_lang = 0; // default english
+	u32 reg_value = default_value;
 	u16 off_string, len_data, len_string;
 	u64 read, pos, off_val_data;
 	CellFsStat stat;
@@ -2925,8 +2930,7 @@ uint32_t get_system_language(uint8_t *lang)
 
 	if(cellFsOpen("/dev_flash2/etc/xRegistry.sys", CELL_FS_O_RDONLY, &reg, NULL, 0) != CELL_FS_SUCCEEDED || reg == -1)
 	{
-		*lang = 0;
-		return val_lang;
+		return reg_value;
 	}
 
 	cellFsStat("/dev_flash2/etc/xRegistry.sys", &stat);
@@ -2935,46 +2939,31 @@ uint32_t get_system_language(uint8_t *lang)
 
 	while(true)
 	{
-	/** Data entries **/
+	//// Data entries ////
 		//unk
 		entry_name += 2;
 
 		//relative entry offset
 		cellFsLseek(reg, entry_name, 0, &pos);
 		cellFsRead(reg, &off_string, 2, &read);
-		entry_name += 2;
-
-		//unk2
-		entry_name += 2;
+		entry_name += 4;
 
 		//data lenght
 		cellFsLseek(reg, entry_name, 0, &pos);
 		cellFsRead(reg, &len_data, 2, &read);
-		entry_name += 2;
-
-		//data type
-		entry_name += 1;
+		entry_name += 3;
 
 		//data
 		off_val_data = entry_name;
-		entry_name += len_data;
+		entry_name += len_data + 1;
 
-		//Separator 0x0
-		entry_name += 1;
-
-	/** String Entries **/
-		off_string += 0x10;
-
-		//unk
-		off_string += 2;
+	//// String Entries ////
+		off_string += 0x12;
 
 		//string length
 		cellFsLseek(reg, off_string, 0, &pos);
 		cellFsRead(reg, &len_string, 2, &read);
-		off_string += 2;
-
-		//string type
-		off_string += 1;
+		off_string += 3;
 
 		//string
 		memset(string, 0, sizeof(string));
@@ -2982,15 +2971,24 @@ uint32_t get_system_language(uint8_t *lang)
 		cellFsRead(reg, string, len_string, &read);
 
 		//Find language
-		if(strcmp(string, "/setting/system/language") == 0)
+		if(strcmp(string, key) == 0)
 		{
 			cellFsLseek(reg, off_val_data, 0, &pos);
-			cellFsRead(reg, &val_lang, 4, &read);
+			cellFsRead(reg, &reg_value, 4, &read);
 			break;
 		}
 
 		if(off_string == 0xCCDD || entry_name >= stat.st_size) break;
 	}
+
+	cellFsClose(reg);
+
+	return reg_value;
+}
+
+uint32_t get_system_language(uint8_t *lang)
+{
+	u32 val_lang = get_xreg_value((char*)"/setting/system/language", 1);
 
 	switch(val_lang)
 	{
@@ -3053,7 +3051,6 @@ uint32_t get_system_language(uint8_t *lang)
 			*lang = 0;
 			break;
 	}
-	cellFsClose(reg);
 
 	return val_lang;
 }
@@ -3495,12 +3492,14 @@ static void detect_firmware(void)
 
 	dex_mode=0;
 
+	if(peekq(0x800000000030F2D0ULL)==DEX) {SYSCALL_TABLE = SYSCALL_TABLE_475D; c_firmware=4.75f; dex_mode=2;}	else
 	if(peekq(0x80000000002ED818ULL)==CEX) {SYSCALL_TABLE = SYSCALL_TABLE_475;  c_firmware=4.75f;}				else
 	if(peekq(0x80000000002ED778ULL)==CEX) {SYSCALL_TABLE = SYSCALL_TABLE_470;  c_firmware=4.70f;}				else
 	if(peekq(0x800000000030F240ULL)==DEX) {SYSCALL_TABLE = SYSCALL_TABLE_470D; c_firmware=4.70f; dex_mode=2;}	else
 	if(peekq(0x80000000002ED860ULL)==CEX) {SYSCALL_TABLE = SYSCALL_TABLE_465;  c_firmware=(peekq(0x80000000002FC938ULL)==0x323031342F31312FULL)?4.66f:4.65f;} else
 	if(peekq(0x800000000030F1A8ULL)==DEX) {SYSCALL_TABLE = SYSCALL_TABLE_465D; c_firmware=(peekq(0x800000000031EBA8ULL)==0x323031342F31312FULL)?4.66f:4.65f; dex_mode=2;}	else
 	if(peekq(0x80000000002ED850ULL)==CEX) {SYSCALL_TABLE = SYSCALL_TABLE_460;  c_firmware=4.60f;}				else
+	if(peekq(0x800000000030F198ULL)==DEX) {SYSCALL_TABLE = SYSCALL_TABLE_460D; c_firmware=4.60f; dex_mode=2;}	else
 	if(peekq(0x80000000002EC5E0ULL)==CEX) {SYSCALL_TABLE = SYSCALL_TABLE_455;  c_firmware=4.55f;}				else
 	if(peekq(0x80000000002E9D70ULL)==CEX) {SYSCALL_TABLE = SYSCALL_TABLE_453;  c_firmware=4.53f;}				else
 	if(peekq(0x800000000030AEA8ULL)==DEX) {SYSCALL_TABLE = SYSCALL_TABLE_453D; c_firmware=4.53f; dex_mode=2;}	else
@@ -3560,10 +3559,11 @@ static void detect_firmware(void)
 		if(c_firmware==4.50f) {base_addr=0x2F4778; open_hook=0x2B81E8;} else
 		if(c_firmware==4.53f) {base_addr=0x2F5F88; open_hook=0x2B83C0;} else
 		if(c_firmware==4.55f) {base_addr=0x2F8730; open_hook=0x2B9C14;} else
-	  //if(c_firmware==4.60f) {base_addr=0x??????; open_hook=0x??????;} else
+		if(c_firmware==4.60f) {base_addr=0x2FA220; open_hook=0x2BB004;} else
 		if(c_firmware==4.65f) {base_addr=0x2FA230; open_hook=0x2BB010;} else
 		if(c_firmware==4.66f) {base_addr=0x2FA230; open_hook=0x2BB010;} else
-		if(c_firmware==4.70f) {base_addr=0x2FA540; open_hook=0x2B2480;}
+		if(c_firmware==4.70f) {base_addr=0x2FA540; open_hook=0x2B2480;} else
+		if(c_firmware==4.75f) {base_addr=0x2FA5B0; open_hook=0x2B24F8;}
 	}
 
 	base_addr |=0x8000000000000000ULL;
@@ -3622,9 +3622,9 @@ static void detect_firmware(void)
 #endif
 	}
 	else // DEX
-	if(c_firmware>=4.55f && c_firmware<=4.70f)
+	if(c_firmware>=4.55f && c_firmware<=4.75f)
 	{
-			get_fan_policy_offset=0x8000000000009EB8ULL; // sys 409 get_fan_policy  4.55/4.60/4.65/4.70
+			get_fan_policy_offset=0x8000000000009EB8ULL; // sys 409 get_fan_policy  4.55/4.60/4.65/4.70/4.75
 			set_fan_policy_offset=0x800000000000A3B4ULL; // sys 389 set_fan_policy
 
 			// idps / psid dex
@@ -3643,6 +3643,12 @@ static void detect_firmware(void)
 			else if(c_firmware==4.70f)
 			{
 				idps_offset1 = 0x80000000004098B0ULL;
+				idps_offset2 = 0x800000000049CAF4ULL;
+				psid_offset  = 0x800000000049CB0CULL;
+			}
+			else if(c_firmware==4.75f)
+			{
+				idps_offset1 = 0x8000000000409930ULL;
 				idps_offset2 = 0x800000000049CAF4ULL;
 				psid_offset  = 0x800000000049CB0CULL;
 			}
@@ -3711,7 +3717,7 @@ static void spoof_idps_psid(void)
 			if(c_firmware<=4.53f)
 			{
 				{system_call_1(SC_GET_PSID, (uint64_t) PSID);}
-				for(j = 0x8000000000000000ULL; j < 0x8000000000600000ULL; j+=4) {
+				for(j = 0x8000000000300000ULL; j < 0x8000000000600000ULL; j+=4) {
 					if((peekq(j) == PSID[0]) && (peekq(j+8) == PSID[1])) {
 						pokeq(j, newPSID[0]); j+=8;
 						pokeq(j, newPSID[1]); j+=8;
@@ -3738,7 +3744,7 @@ static void spoof_idps_psid(void)
 			if(c_firmware<=4.53f)
 			{
 				{system_call_1(SC_GET_IDPS, (uint64_t) IDPS);}
-				for(j = 0x8000000000000000ULL; j < 0x8000000000600000ULL; j+=4)
+				for(j = 0x8000000000300000ULL; j < 0x8000000000600000ULL; j+=4)
 				{
 					if((peekq(j) == IDPS[0]) && (peekq(j+8) == IDPS[1]))
 					{
@@ -3806,15 +3812,15 @@ static void remove_cfw_syscalls(void)
 	if(sc7 !=sc_null) pokeq(sc7,  sc_not_impl_pt);
 
 	#ifdef PS3MAPI
-  //{ system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 8); }
-	{ system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 9); }
-	{ system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 10); }
-	{ system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 11); }
-  //{ system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 35); }
-	{ system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 36); }
-	{ system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 6); }
-	{ system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 7); }
-	{ system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_PDISABLE_SYSCALL8, 1); }//Partial disable syscall8 (Keep cobra/mamba+ps3mapi features only)
+  //{ system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 8); }
+	{ system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 9); }
+	{ system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 10); }
+	{ system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 11); }
+  //{ system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 35); }
+	{ system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 36); }
+	{ system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 6); }
+	{ system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 7); }
+	{ system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_PDISABLE_SYSCALL8, 1); }//Partial disable syscall8 (Keep cobra/mamba+ps3mapi features only)
 	#endif
 }
 #endif
@@ -4732,31 +4738,35 @@ static void get_default_icon(char *icon, char *param, char *file, int isdir, cha
 		strcpy(icon, wm_icons[5]);
 }
 
-static int get_title_and_id_from_sfo(char *templn, char *tempID, char *entry_name, char *icon, char *data)
+static int get_title_and_id_from_sfo(char *templn, char *tempID, char *entry_name, char *icon, char *data, u8 f0)
 {
-	int fdw;
+	int fdw, ret;
 
-	if(cellFsOpen(templn, CELL_FS_O_RDONLY, &fdw, NULL, 0)==CELL_FS_SUCCEEDED)
+	ret = cellFsOpen(templn, CELL_FS_O_RDONLY, &fdw, NULL, 0);
+
+	templn[0]=0;
+
+	if(ret==CELL_FS_SUCCEEDED)
 	{
 		uint64_t msiz = 0;
 		cellFsLseek(fdw, 0, CELL_FS_SEEK_SET, &msiz);
 		cellFsRead(fdw, (void *)data, _4KB_, &msiz);
 		cellFsClose(fdw);
 
-		templn[0]=0;
 		if(msiz>256)
 		{
 			unsigned char *mem = (u8*)data;
 			parse_param_sfo(mem, tempID, templn);
 			if(!webman_config->nocov) get_cover(icon, tempID);
 		}
-        if(templn[0]==0) get_name(templn, entry_name, 2); //use file name as title
-		return 0;
 	}
-	else
-		{get_name(templn, entry_name, 2); utf8enc(data, templn);} //use file name as title
 
-		return 1;
+	if(!templn[0])
+	{
+		get_name(templn, entry_name, 2); if(f0!=NTFS) utf8enc(data, templn); //use file name as title
+	}
+
+	return ( (ret==CELL_FS_SUCCEEDED) ? 0 : 1 );
 }
 
 static void make_fb_xml(char *myxml)
@@ -4961,7 +4971,7 @@ static int add_net_game(int ns, netiso_read_dir_result_data *data, int v3_entry,
 			cellFsChmod(templn, MODE);
 		}
 
-		get_title_and_id_from_sfo(templn, tempID, data[v3_entry].name, icon, tempstr);
+		get_title_and_id_from_sfo(templn, tempID, data[v3_entry].name, icon, tempstr, 0);
 	}
 	else
 		{get_name(enc_dir_name, data[v3_entry].name, 0); utf8enc(templn, enc_dir_name);}
@@ -5112,8 +5122,8 @@ static void add_query_html(char *buffer, char *param, char *label)
 
 static void add_xmb_entry(char *param, char *tempstr, char *templn, char *skey, u32 key, char *myxml_ps3, char *myxml_ps2, char *myxml_psx, char *myxml_psp, char *myxml_dvd, char *entry_name, u16 *item_count)
 {
-	if(strlen(templn)<5) strcat(templn, "     ");
-	sprintf(skey, "3%c%c%c%c%04i", templn[0], templn[1], templn[2], templn[3], key);
+	if(strlen(templn)<6) strcat(templn, "      ");
+	sprintf(skey, "3%c%c%c%c%c%c%04i", templn[0], templn[1], templn[2], templn[3], templn[4], templn[5], key);
 
 	if( !(webman_config->nogrp) )
 	{
@@ -5326,9 +5336,9 @@ static bool update_mygames_xml(u64 conn_s_p)
 	{system_call_1(SC_GET_FREE_MEM, (uint64_t)(u32) &meminfo);}
 	if((meminfo.avail)<( (BUFFER_SIZE_ALL) + MIN_MEM)) set_buffer_sizes(3); //MIN+
 	if((meminfo.avail)<( (BUFFER_SIZE_ALL) + MIN_MEM)) set_buffer_sizes(1); //MIN
-	if((meminfo.avail)<( (BUFFER_SIZE_ALL) + MIN_MEM)) //leave if less than min memory
+	if((meminfo.avail)<( (BUFFER_SIZE_ALL) + MIN_MEM))
 	{
-		return false;
+		return false;  //leave if less than min memory
 	}
 
 	sys_addr_t sysmem=0;
@@ -5445,7 +5455,7 @@ static bool update_mygames_xml(u64 conn_s_p)
 	cellRtcGetCurrentTick(&pTick);
 
 	int fd;
-	char skey[1024][10];
+	char skey[MAX_XMB_ITEMS][12];
 	u8 is_net=0;
 
 	// --- scan xml content ---
@@ -5474,7 +5484,7 @@ static bool update_mygames_xml(u64 conn_s_p)
 #ifndef COBRA_ONLY
 			if(IS_ISO_FOLDER && !(IS_PS2_FOLDER)) continue; // 0="GAMES", 1="GAMEZ", 5="PS2ISO", 10="video"
 #endif
-			if(key>1600) break;
+			if(key>MAX_XMB_ITEMS) break;
 
 			cellRtcGetCurrentTick(&pTick);
 
@@ -5590,7 +5600,7 @@ read_folder_xml:
 #endif
 					)
 				{
-					if(key>1600) break;
+					if(key>MAX_XMB_ITEMS) break;
 					cellRtcGetCurrentTick(&pTick);
 					icon[0]=tempID[0]=0;
 
@@ -5660,7 +5670,7 @@ next_xml_entry:
 							msiz=0;
 							if(!is_iso)
 							{
-                                get_title_and_id_from_sfo(templn, tempID, entry.d_name, icon, tempstr);
+								get_title_and_id_from_sfo(templn, tempID, entry.d_name, icon, tempstr, 0);
 							}
 							else
 							{
@@ -5681,7 +5691,7 @@ next_xml_entry:
 										sprintf(templn, "%s/%s.SFO", param, tempstr);
 									}
 
-									get_title_and_id_from_sfo(templn, tempID, entry.d_name, icon, tempstr);
+									get_title_and_id_from_sfo(templn, tempID, entry.d_name, icon, tempstr, f0);
 								}
 								else
 #endif
@@ -5887,7 +5897,7 @@ continue_reading_folder_xml:
 
 	for(u16 a=0; a<key; a++)
 	{
-		sprintf(templn, ADD_XMB_ITEM("%s"), skey[(a)]+5, skey[(a)]+5);
+		sprintf(templn, ADD_XMB_ITEM("%s"), skey[(a)]+7, skey[(a)]+7);
 		if( !(webman_config->nogrp))
 		{
 #ifdef COBRA_ONLY
@@ -6304,8 +6314,7 @@ static void cpu_rsx_stats(char *buffer, char *templn, char *param)
 	{system_call_3(SYS_NET_EURUS_POST_COMMAND, CMD_GET_MAC_ADDRESS, (u64)(u32)mac_address, 0x13);}
 
 #ifdef COBRA_ONLY
-    #define SYSCALL8_OPCODE_GET_MAMBA  0x7FFFULL
-    bool is_mamba; {system_call_1(8, SYSCALL8_OPCODE_GET_MAMBA); is_mamba = ((int)p1 ==0x666);}
+    bool is_mamba; {system_call_1(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_GET_MAMBA); is_mamba = ((int)p1 ==0x666);}
 
     uint16_t cobra_version; sys_get_version2(&cobra_version);
     sprintf(param, "%s %s: %X.%X", dex_mode ? "DEX" : "CEX", is_mamba ? "Mamba" : "Cobra", cobra_version>>8, (cobra_version & 0xF) ? (cobra_version & 0xFF) : ((cobra_version>>4) & 0xF));
@@ -6525,6 +6534,7 @@ static void setup_parse_settings(char *param)
 	if(strstr(param, "fp=1")) webman_config->foot=1; //MIN
 	if(strstr(param, "fp=2")) webman_config->foot=2; //MAX
 	if(strstr(param, "fp=3")) webman_config->foot=3; //MIN+
+	if(strstr(param, "fp=4")) webman_config->foot=4; //MAX+
 
 	webman_config->spp=0;
 #ifdef COBRA_ONLY
@@ -6866,7 +6876,8 @@ static void setup_form(char *buffer, char *templn)
 	add_radio_button("fp", "0", "fo_0", "Standard (896KB)", ",  ", (webman_config->foot==0), buffer);
 	add_radio_button("fp", "1", "fo_1", "Min (320KB)"     , ",  ", (webman_config->foot==1), buffer);
 	add_radio_button("fp", "3", "fo_3", "Min+ (512KB)"    , ",  ", (webman_config->foot==3), buffer);
-	add_radio_button("fp", "2", "fo_2", "Max (1280KB)"    , NULL , (webman_config->foot==2), buffer);
+	add_radio_button("fp", "2", "fo_2", "Max (1280KB)"    , ",  ", (webman_config->foot==2), buffer);
+	add_radio_button("fp", "4", "fo_4", "Max+ (1280KB)"   , ",  ", (webman_config->foot==4), buffer);
 
 #ifndef ENGLISH_ONLY
 	//language
@@ -6911,19 +6922,19 @@ static void setup_form(char *buffer, char *templn)
 	//BD Region
 	strcat(buffer, " • BD Region: <select name=\"bdr\">");
 	add_option_item("0" , STR_DEFAULT, (cobra_config->bd_video_region==0) , buffer);
-	add_option_item("1" , "A"        , (cobra_config->bd_video_region==1) , buffer);
-	add_option_item("2" , "B"        , (cobra_config->bd_video_region==2) , buffer);
-	add_option_item("4" , "C"        , (cobra_config->bd_video_region==4) , buffer);
+	add_option_item("1" , "A- America", (cobra_config->bd_video_region==1) , buffer);
+	add_option_item("2" , "B- Europe" , (cobra_config->bd_video_region==2) , buffer);
+	add_option_item("4" , "C- Asia"   , (cobra_config->bd_video_region==4) , buffer);
 
 	//DVD Region
 	strcat(buffer, "</select> • DVD Region: <select name=\"dvr\">");
 	add_option_item("0"  , STR_DEFAULT, (cobra_config->dvd_video_region==0)  , buffer);
-	add_option_item("1"  , "1"        , (cobra_config->dvd_video_region==1)  , buffer);
-	add_option_item("2"  , "2"        , (cobra_config->dvd_video_region==2)  , buffer);
-	add_option_item("4"  , "3"        , (cobra_config->dvd_video_region==4)  , buffer);
-	add_option_item("8"  , "4"        , (cobra_config->dvd_video_region==8)  , buffer);
-	add_option_item("16" , "5"        , (cobra_config->dvd_video_region==16) , buffer);
-	add_option_item("32" , "6"        , (cobra_config->dvd_video_region==32) , buffer);
+	add_option_item("1"  , "1- US/Canada"       , (cobra_config->dvd_video_region==1)  , buffer);
+	add_option_item("2"  , "2- Europe/Japan"    , (cobra_config->dvd_video_region==2)  , buffer);
+	add_option_item("4"  , "3- Korea/HK"        , (cobra_config->dvd_video_region==4)  , buffer);
+	add_option_item("8"  , "4- Latino/Australia", (cobra_config->dvd_video_region==8)  , buffer);
+	add_option_item("16" , "5- Asia"            , (cobra_config->dvd_video_region==16) , buffer);
+	add_option_item("32" , "6- China"           , (cobra_config->dvd_video_region==32) , buffer);
 	strcat(buffer, "</select>");
 #endif
 #endif
@@ -7432,7 +7443,6 @@ static bool game_listing(char *buffer, char *templn, char *param, int conn_s, ch
 		u8 is_net=0;
 
 		char ename[8];
-		char swap[1024];
 		u16 idx=0;
 		u32 tlen=strlen(buffer); buffer[tlen]=0;
 		char *sysmem_html=buffer+_8KB_;
@@ -7676,7 +7686,7 @@ next_html_entry:
 										sprintf(templn, "%s/%s.SFO", param, tempstr);
 									}
 
-									if(get_title_and_id_from_sfo(templn, tempID, entry.d_name, icon, tempstr)==1)
+									if(get_title_and_id_from_sfo(templn, tempID, entry.d_name, icon, tempstr, f0)==1)
 									{
 										if( f0!=NTFS ) //get title id from ISO
 										{
@@ -7714,7 +7724,7 @@ next_html_entry:
 							}
 							else
 							{
-								get_title_and_id_from_sfo(templn, tempID, entry.d_name, icon, tempstr);
+								get_title_and_id_from_sfo(templn, tempID, entry.d_name, icon, tempstr, 0);
 							}
 
 							if(!is_iso && f1<2 && (icon[0]==0 || webman_config->nocov)) sprintf(icon, "%s/%s/PS3_GAME/ICON0.PNG", param, entry.d_name);
@@ -7815,6 +7825,7 @@ next_html_entry:
 		if(idx)
 		{   // sort html game items
 			u16 n, m;
+			char swap[1024];
 			for(n=0; n<(idx-1); n++)
 				for(m=(n+1); m<idx; m++)
 					if(strcasecmp(line_entry[n].path, line_entry[m].path)>0)
@@ -8131,17 +8142,18 @@ static void ps3mapi_setidps(char *buffer, char *templn, char *param);
 static void ps3mapi_getmem(char *buffer, char *templn, char *param);
 static void ps3mapi_setmem(char *buffer, char *templn, char *param);
 static void ps3mapi_vshplugin(char *buffer, char *templn, char *param);
+static void ps3mapi_gameplugin(char *buffer, char *templn, char *param);
 
 static void ps3mapi_home(char *buffer, char *templn)
 {
 	int syscall8_state = -1;
-	{system_call_2(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_PCHECK_SYSCALL8); syscall8_state = (int)p1;}
+	{system_call_2(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_PCHECK_SYSCALL8); syscall8_state = (int)p1;}
 	int version = 0;
-	if (syscall8_state>=0) {system_call_2(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_CORE_VERSION); version = (int)(p1);}
+	if(syscall8_state>=0) {system_call_2(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_CORE_VERSION); version = (int)(p1);}
 	int versionfw = 0;
-	if (syscall8_state>=0) {system_call_2(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_FW_VERSION); versionfw = (int)(p1);}
+	if(syscall8_state>=0) {system_call_2(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_FW_VERSION); versionfw = (int)(p1);}
 	char fwtype[32];
-	if (syscall8_state>=0) {system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_FW_TYPE, (u64)(u32)fwtype);}
+	if(syscall8_state>=0) {system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_FW_TYPE, (u64)(u32)fwtype);}
 
 	//---------------------------------------------
 	//PS3 Commands---------------------------------
@@ -8198,8 +8210,13 @@ static void ps3mapi_home(char *buffer, char *templn)
 		//---------------------------------------------
 		ps3mapi_vshplugin(buffer, templn, (char*)" ");
 
+		//---------------------------------------------
+		//Game Plugin-----------------------------------
+		//---------------------------------------------
+		ps3mapi_gameplugin(buffer, templn, (char*)" ");
+
 		sprintf(templn, "<hr color=\"#FF0000\"/>"
-						"Firmware: %X %s | PS3MAPI: webUI v%X, Server v%X, Core v%X | By NzV", versionfw, fwtype, PS3MAPI_WEBUI_VERSION, PS3MAPI_SERVER_VERSION, version);
+						"Firmware: %X %s | PS3MAPI: webUI v%X, Server v%X, Core v%X | By NzV, modified by OsirisX", versionfw, fwtype, PS3MAPI_WEBUI_VERSION, PS3MAPI_SERVER_VERSION, version);
 		strcat(buffer, templn);
 	}
 	else
@@ -8323,13 +8340,13 @@ static void ps3mapi_syscall(char *buffer, char *templn, char *param)
 
 	if(strstr(param, "syscall.ps3mapi?"))
 	{
-		if(strstr(param, "sc9=1"))  { system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 9);  }
-		if(strstr(param, "sc10=1")) { system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 10); }
-		if(strstr(param, "sc11=1")) { system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 11); }
-		if(strstr(param, "sc35=1")) { system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 35); }
-		if(strstr(param, "sc36=1")) { system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 36); }
-		if(strstr(param, "sc6=1"))  { system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 6);  }
-		if(strstr(param, "sc7=1"))  { system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 7);  }
+		if(strstr(param, "sc9=1"))  { system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 9);  }
+		if(strstr(param, "sc10=1")) { system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 10); }
+		if(strstr(param, "sc11=1")) { system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 11); }
+		if(strstr(param, "sc35=1")) { system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 35); }
+		if(strstr(param, "sc36=1")) { system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 36); }
+		if(strstr(param, "sc6=1"))  { system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 6);  }
+		if(strstr(param, "sc7=1"))  { system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 7);  }
 	}
 
 	if(!is_ps3mapi_home)
@@ -8348,35 +8365,35 @@ static void ps3mapi_syscall(char *buffer, char *templn, char *param)
 
 	int ret_val = -1;
 
-    { system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_CHECK_SYSCALL, 6); ret_val = (int)p1;}
+    { system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_CHECK_SYSCALL, 6); ret_val = (int)p1;}
 	if( ret_val != 0 )  add_check_box("sc6", "1\" disabled=\"disabled", "[6]LV2 Peek", NULL, true, buffer);
 	else {ret_val = -1; add_check_box("sc6", "1", "[6]LV2 Peek", NULL, false, buffer);}
 
-    { system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_CHECK_SYSCALL, 7); ret_val = (int)p1;}
+    { system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_CHECK_SYSCALL, 7); ret_val = (int)p1;}
 	if( ret_val != 0 )  add_check_box("sc7", "1\" disabled=\"disabled", "[7]LV2 Poke", NULL, true, buffer);
 	else {ret_val = -1; add_check_box("sc7", "1", "[7]LV2 Poke", NULL, false, buffer);}
 
     strcat(buffer, "</td><td  width=\"260\"  valign=\"top\" style=\"text-align:left; float:left;\">");
 
-    { system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_CHECK_SYSCALL, 9); ret_val = (int)p1;}
+    { system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_CHECK_SYSCALL, 9); ret_val = (int)p1;}
 	if( ret_val != 0 )  add_check_box("sc9", "1\" disabled=\"disabled", "[9]LV1 Poke", NULL, true, buffer);
 	else {ret_val = -1; add_check_box("sc9", "1", "[9]LV1 Poke", NULL, false, buffer);}
 
-    { system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_CHECK_SYSCALL, 10); ret_val = (int)p1;}
+    { system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_CHECK_SYSCALL, 10); ret_val = (int)p1;}
 	if( ret_val != 0 )  add_check_box("sc10", "1\" disabled=\"disabled", "[10]LV1 Call", NULL, true, buffer);
 	else {ret_val = -1; add_check_box("sc10", "1", "[10]LV1 Call", NULL, false, buffer);}
 
-    { system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_CHECK_SYSCALL, 11); ret_val = (int)p1;}
+    { system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_CHECK_SYSCALL, 11); ret_val = (int)p1;}
 	if( ret_val != 0 )  add_check_box("sc11", "1\" disabled=\"disabled", "[11]LV1 Peek", NULL, true, buffer);
 	else {ret_val = -1; add_check_box("sc11", "1", "[11]LV1 Peek", NULL, false, buffer);}
 
     strcat(buffer, "</td><td  width=\"260\"  valign=\"top\" style=\"text-align:left; float:left;\">");
 
-    { system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_CHECK_SYSCALL, 35); ret_val = (int)p1;}
+    { system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_CHECK_SYSCALL, 35); ret_val = (int)p1;}
 	if( ret_val != 0 )  add_check_box("sc35", "1\" disabled=\"disabled", "[35]Map Path", NULL, true, buffer);
 	else {ret_val = -1; add_check_box("sc35", "1", "[35]Map Path", NULL, false, buffer);}
 
-	{ system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_CHECK_SYSCALL, 36); ret_val = (int)p1;}
+	{ system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_CHECK_SYSCALL, 36); ret_val = (int)p1;}
 	if( ret_val != 0 )  add_check_box("sc36", "1\" disabled=\"disabled", "[36]Map Game", NULL, true, buffer);
 	else {ret_val = -1; add_check_box("sc36", "1", "[36]Map Game", NULL, false, buffer);}
 
@@ -8391,11 +8408,11 @@ static void ps3mapi_syscall8(char *buffer, char *templn, char *param)
 
 	if(strstr(param, "syscall8.ps3mapi?"))
 	{
-		if(strstr(param, "mode=0")) {{ system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_PDISABLE_SYSCALL8, 0); }}
-		if(strstr(param, "mode=1")) {{ system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_PDISABLE_SYSCALL8, 1); }}
-		if(strstr(param, "mode=2")) {{ system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_PDISABLE_SYSCALL8, 2); }}
-		if(strstr(param, "mode=3")) {{ system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_PDISABLE_SYSCALL8, 3); }}
-		if(strstr(param, "mode=4")) {{ system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 8); }}
+		if(strstr(param, "mode=0")) {{ system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_PDISABLE_SYSCALL8, 0); }}
+		if(strstr(param, "mode=1")) {{ system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_PDISABLE_SYSCALL8, 1); }}
+		if(strstr(param, "mode=2")) {{ system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_PDISABLE_SYSCALL8, 2); }}
+		if(strstr(param, "mode=3")) {{ system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_PDISABLE_SYSCALL8, 3); }}
+		if(strstr(param, "mode=4")) {{ system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, 8); }}
 	}
 
 	sprintf(templn, "<b>%s%s --> %s</b>"
@@ -8406,7 +8423,7 @@ static void ps3mapi_syscall8(char *buffer, char *templn, char *param)
 					is_ps3mapi_home ? "" : "PS3MAPI --> ", "PS3 Commands", "CFW syscall 8");
 	strcat(buffer, templn);
 	int ret_val = -1;
-	{ system_call_2(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_PCHECK_SYSCALL8); ret_val = (int)p1;}
+	{ system_call_2(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_PCHECK_SYSCALL8); ret_val = (int)p1;}
 	if(ret_val < 0)
 	{
 		add_radio_button("mode\" disabled=\"disabled", "0", "sc8_0", "Fully enabled", NULL, false, buffer);
@@ -8483,14 +8500,14 @@ static void ps3mapi_getmem(char *buffer, char *templn, char *param)
 		strcat(buffer, "<select name=\"proc\">");
 		char pid_str[32];
 		u32 pid_list[16];
-		{system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_ALL_PROC_PID, (u64)(u32)pid_list); }
+		{system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_ALL_PROC_PID, (u64)(u32)pid_list); }
 		for(int i = 0; i < 16; i++)
 		{
 			if(1 < pid_list[i])
 			{
 				memset(templn, 0, MAX_LINE_LEN);
 				memset(pid_str, 0, sizeof(pid_str));
-				{system_call_4(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_PROC_NAME_BY_PID, (u64)(u32)pid_list[i], (u64)(u32)templn); }
+				{system_call_4(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_PROC_NAME_BY_PID, (u64)(u32)pid_list[i], (u64)(u32)templn); }
 				sprintf(pid_str, "%i", pid_list[i]);
 				if(1 < strlen(templn))add_option_item(pid_str , templn, true, buffer);
 			}
@@ -8500,7 +8517,7 @@ static void ps3mapi_getmem(char *buffer, char *templn, char *param)
 	else
 	{
 		memset(templn, 0, MAX_LINE_LEN);
-		{system_call_4(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_PROC_NAME_BY_PID, (u64)pid, (u64)(u32)templn); }
+		{system_call_4(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_PROC_NAME_BY_PID, (u64)pid, (u64)(u32)templn); }
 		strcat(buffer, templn);
 		sprintf(templn, "<input name=\"proc\" type=\"hidden\" value=\"%u\"><br><br>", pid);
 		strcat(buffer, templn);
@@ -8517,7 +8534,7 @@ static void ps3mapi_getmem(char *buffer, char *templn, char *param)
 		char buffer_tmp[length + 1];
 		memset(buffer_tmp, 0, sizeof(buffer_tmp));
 		int retval = -1;
-		{system_call_6(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_PROC_MEM, (u64)pid, (u64)address, (u64)(u32)buffer_tmp, (u64)length); retval = (int)p1;}
+		{system_call_6(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_PROC_MEM, (u64)pid, (u64)address, (u64)(u32)buffer_tmp, (u64)length); retval = (int)p1;}
 		if(0 <= retval)
 		{
 			for(int i = 0; i < length; i++)
@@ -8592,14 +8609,14 @@ static void ps3mapi_setmem(char *buffer, char *templn, char *param)
 		strcat(buffer, "<select name=\"proc\">");
 		char pid_str[32];
 		u32 pid_list[16];
-		{system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_ALL_PROC_PID, (u64)(u32)pid_list); }
+		{system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_ALL_PROC_PID, (u64)(u32)pid_list); }
 		for(int i = 0; i < 16; i++)
 		{
 			if(1 < pid_list[i])
 			{
 				memset(templn, 0, MAX_LINE_LEN);
 				memset(pid_str, 0, sizeof(pid_str));
-				{system_call_4(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_PROC_NAME_BY_PID, (u64)pid_list[i], (u64)(u32)templn); }
+				{system_call_4(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_PROC_NAME_BY_PID, (u64)pid_list[i], (u64)(u32)templn); }
 				sprintf(pid_str, "%i", pid_list[i]);
 				if(1 < strlen(templn))add_option_item(pid_str , templn, true, buffer);
 			}
@@ -8609,7 +8626,7 @@ static void ps3mapi_setmem(char *buffer, char *templn, char *param)
 	else
 	{
 		memset(templn, 0, MAX_LINE_LEN);
-		{system_call_4(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_PROC_NAME_BY_PID, (u64)pid, (u64)(u32)templn); }
+		{system_call_4(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_PROC_NAME_BY_PID, (u64)pid, (u64)(u32)templn); }
 		strcat(buffer, templn);
 		sprintf(templn, "<input name=\"proc\" type=\"hidden\" value=\"%u\"><br><br>", pid);
 		strcat(buffer, templn);
@@ -8626,7 +8643,7 @@ static void ps3mapi_setmem(char *buffer, char *templn, char *param)
 	if(pid != 0 && length != 0)
 	{
 		int retval = -1;
-		{system_call_6(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_SET_PROC_MEM, (u64)pid, (u64)address, (u64)(u32)value, (u64)length); retval = (int)p1;}
+		{system_call_6(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_SET_PROC_MEM, (u64)pid, (u64)address, (u64)(u32)value, (u64)length); retval = (int)p1;}
 		if(0 <= retval) sprintf(templn, "<br><b><u>%s!</u></b>", "Done");
 		else sprintf(templn, "<br><b><u>%s: %i</u></b>", "Error", retval);
 		strcat(buffer, templn);
@@ -8639,8 +8656,8 @@ static void ps3mapi_setidps(char *buffer, char *templn, char *param)
 {
 	bool is_ps3mapi_home = (param[0] == ' ');
 
-	{system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_IDPS, (u64)IDPS);}
-	{system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_PSID, (u64)PSID);}
+	{system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_IDPS, (u64)IDPS);}
+	{system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_PSID, (u64)PSID);}
 	u64 _new_IDPS[2] = { IDPS[0], IDPS[1]};
 	u64 _new_PSID[2] = { PSID[0], PSID[1]};
 
@@ -8663,7 +8680,7 @@ static void ps3mapi_setidps(char *buffer, char *templn, char *param)
 			_new_IDPS[1] = convertH(idps2_tmp);
 		}
 		else goto setidps_err_arg1;
-		{system_call_4(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_SET_IDPS, (u64)_new_IDPS[0], (u64)_new_IDPS[1]);}
+		{system_call_4(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_SET_IDPS, (u64)_new_IDPS[0], (u64)_new_IDPS[1]);}
 
 	 setidps_err_arg1:
 
@@ -8683,7 +8700,7 @@ static void ps3mapi_setidps(char *buffer, char *templn, char *param)
 			_new_PSID[1] = convertH(psid2_tmp);
 		}
 		else goto setidps_err_arg2;
-		{system_call_4(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_SET_PSID, (u64)_new_PSID[0], (u64)_new_PSID[1]);}
+		{system_call_4(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_SET_PSID, (u64)_new_PSID[0], (u64)_new_PSID[1]);}
 	}
 
  setidps_err_arg2:
@@ -8715,7 +8732,7 @@ static void ps3mapi_vshplugin(char *buffer, char *templn, char *param)
 			char uslot_str[3];
 			get_value(uslot_str, pos + 12, 2);
 			uslot = val(uslot_str);
-			if ( uslot ){{system_call_2(8, SYSCALL8_OPCODE_UNLOAD_VSH_PLUGIN, (u64)uslot);}}
+			if ( uslot ) {{system_call_2(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_UNLOAD_VSH_PLUGIN, (u64)uslot);}}
 		}
 		else
 		{
@@ -8732,7 +8749,7 @@ static void ps3mapi_vshplugin(char *buffer, char *templn, char *param)
 			{
 				char prx_path[256];
 				get_value(prx_path, pos + 4, 256);
-				if ( uslot ){{system_call_5(8, SYSCALL8_OPCODE_LOAD_VSH_PLUGIN, (u64)uslot, (u64)(u32)prx_path, NULL, 0);}}
+				if ( uslot ) {{system_call_5(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_LOAD_VSH_PLUGIN, (u64)uslot, (u64)(u32)prx_path, NULL, 0);}}
 			}
 		}
 	}
@@ -8755,7 +8772,7 @@ loadvshplug_err_arg:
 	{
 		memset(tmp_name, 0, sizeof(tmp_name));
 		memset(tmp_filename, 0, sizeof(tmp_filename));
-		{system_call_5(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_VSH_PLUGIN_INFO, (u64)slot, (u64)(u32)tmp_name, (u64)(u32)tmp_filename); }
+		{system_call_5(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_VSH_PLUGIN_INFO, (u64)slot, (u64)(u32)tmp_name, (u64)(u32)tmp_filename); }
 		if (strlen(tmp_filename) > 0)
 		{
 			sprintf(templn, "<tr><td width=\"75\" style=\"text-align:left; float:left;\">%i</td>"
@@ -8801,6 +8818,176 @@ loadvshplug_err_arg:
 		}
 
 		strcat(buffer, "</datalist>");
+	}
+
+	sprintf(templn, "%s", "</table><br>");
+	if(!is_ps3mapi_home) strcat(templn, "<hr color=\"#FF0000\"/>");
+	strcat(buffer, templn);
+}
+
+static void ps3mapi_gameplugin(char *buffer, char *templn, char *param)
+{
+	bool is_ps3mapi_home = (param[0] == ' ');
+
+	u32 pid = 0;
+
+	if(strstr(param, "gameplugin.ps3mapi?"))
+	{
+		unsigned int uslot = 99;
+
+		char *pos;
+		pos=strstr(param, "proc=");
+		if(pos)
+		{
+			char pid_tmp[20];
+			get_value(pid_tmp, pos + 5, 19);
+			pid = val(pid_tmp);
+		}
+		else goto loadgameplug_err_arg;
+		pos=strstr(param, "unload_slot=");
+		if(pos)
+		{
+			char uslot_str[32];
+			get_value(uslot_str, pos + 12, 31);
+			uslot = val(uslot_str);
+			{system_call_4(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_UNLOAD_PROC_MODULE, (u64)pid, (u64)uslot); }
+		}
+		else
+		{
+			pos=strstr(param, "load_slot=");
+			if(pos)
+			{
+				char uslot_str[3];
+				get_value(uslot_str, pos + 10, 2);
+				uslot = val(uslot_str);
+			}
+			else goto loadgameplug_err_arg;
+			pos=strstr(param, "prx=");
+			if(pos)
+			{
+				char prx_path[256];
+				get_value(prx_path, pos + 4, 256);
+				{system_call_6(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_LOAD_PROC_MODULE, (u64)pid, (u64)(u32)prx_path, NULL, 0); }
+			}
+		}
+	}
+
+loadgameplug_err_arg:
+
+	if(!is_ps3mapi_home)
+		sprintf(templn, "<b>%s --> %s</b>"
+						"<hr color=\"#0099FF\"/>",
+						"PS3MAPI", "Game Plugins");
+	else
+		sprintf(templn, "<b>%s</b><hr color=\"#0099FF\"/>", "Game Plugins");
+
+	strcat(buffer, templn);
+
+	sprintf(templn, "<form action=\"/gameplugin.ps3mapi\" method=\"get\" enctype=\"application/x-www-form-urlencoded\" target=\"_self\"><br>"
+					"<b><u>%s:</u></b>  ", "Process");
+	strcat(buffer, templn); memset(templn, 0, MAX_LINE_LEN);
+
+	if(pid == 0)
+	{
+		strcat(buffer, "<select name=\"proc\">");
+		char pid_str[32];
+		u32 pid_list[16];
+		{system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_ALL_PROC_PID, (u64)(u32)pid_list); }
+		for(int i = 0; i < 16; i++)
+		{
+			if(1 < pid_list[i])
+			{
+				memset(templn, 0, MAX_LINE_LEN);
+				memset(pid_str, 0, sizeof(pid_str));
+				{system_call_4(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_PROC_NAME_BY_PID, (u64)(u32)pid_list[i], (u64)(u32)templn); }
+				sprintf(pid_str, "%i", pid_list[i]);
+				if(1 < strlen(templn))add_option_item(pid_str , templn, true, buffer);
+			}
+		}
+		strcat(buffer, "</select>   ");
+	}
+	else
+	{
+		memset(templn, 0, MAX_LINE_LEN);
+		{system_call_4(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_PROC_NAME_BY_PID, (u64)pid, (u64)(u32)templn); }
+		strcat(buffer, templn);
+		sprintf(templn, "<input name=\"proc\" type=\"hidden\" value=\"%u\"><br><br>", pid);
+		strcat(buffer, templn);
+	}
+
+	if(is_ps3mapi_home)
+		sprintf(templn, "<input type=\"submit\" value=\" Set \" /></form>");
+	else
+		sprintf(templn, "</form>");
+
+	strcat(buffer, templn);
+
+	if(pid != 0)
+	{
+		sprintf(templn,
+					"<table border=\"0\" cellspacing=\"2\" cellpadding=\"0\">"
+					"<tr><td width=\"75\" style=\"text-align:left; float:left;\">%s</td>"
+					"<td width=\"300\" style=\"text-align:left; float:left;\">%s</td>"
+					"<td width=\"500\" style=\"text-align:left; float:left;\">%s</td>"
+					"<td width=\"125\" style=\"text-align:right; float:right;\"> </td></tr>",
+					"Slot", "Name", "File name");
+		strcat(buffer, templn);
+
+		char tmp_name[30];
+		char tmp_filename[256];
+		u32 mod_list[54];
+		memset(mod_list, 0, sizeof(mod_list));
+		{system_call_4(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_ALL_PROC_MODULE_PID, (u64)pid, (u64)(u32)mod_list);}
+
+		for(unsigned int slot = 0; slot < 54; slot++)
+		{
+			memset(tmp_name, 0, sizeof(tmp_name));
+			memset(tmp_filename, 0, sizeof(tmp_filename));
+			if(1 < mod_list[slot])
+			{
+				{system_call_5(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_PROC_MODULE_NAME, (u64)pid, (u64)mod_list[slot], (u64)(u32)tmp_name);}
+				{system_call_5(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_PROC_MODULE_FILENAME, (u64)pid, (u64)mod_list[slot], (u64)(u32)tmp_filename);}
+			}
+			if(strlen(tmp_filename) > 0)
+			{
+				sprintf(templn,
+						"<tr>"
+						 "<td width=\"75\" style=\"text-align:left; float:left;\">%i</td>"
+						 "<td width=\"300\" style=\"text-align:left; float:left;\">%s</td>"
+						 "<td width=\"500\" style=\"text-align:left; float:left;\">%s</td>"
+						 "<td width=\"100\" style=\"text-align:right; float:right;\">"
+						  "<form action=\"/gameplugin.ps3mapi\" method=\"get\" enctype=\"application/x-www-form-urlencoded\" target=\"_self\">"
+						  "<input name=\"proc\" type=\"hidden\" value=\"%u\">"
+						  "<input name=\"unload_slot\" type=\"hidden\" value=\"%i\">"
+						  "<input type=\"submit\" value=\" Unload \">"
+						  "</form>"
+						 "</td>"
+						"</tr>",
+						slot, tmp_name, tmp_filename, pid, mod_list[slot]);
+			}
+			else
+			{
+				sprintf(tmp_name, "NULL");
+				sprintf(tmp_filename, "/dev_hdd0/tmp/my_plugin_%i.sprx", slot);
+				sprintf(templn,
+						"<tr>"
+						  "<td width=\"75\" style=\"text-align:left; float:left;\">%i</td>"
+						  "<td width=\"300\" style=\"text-align:left; float:left;\">%s</td>"
+						  "<td width=\"100\" style=\"text-align:right; float:right;\">"
+						    "<form action=\"/gameplugin.ps3mapi\" method=\"get\" enctype=\"application/x-www-form-urlencoded\" target=\"_self\">"
+						      "<td width=\"500\" style=\"text-align:left; float:left\">"
+						        "<input name=\"proc\" type=\"hidden\" value=\"%u\">"
+						        HTML_INPUT("prx\" list=\"plugins", "%s", "128", "75")
+						        "<input name=\"load_slot\" type=\"hidden\" value=\"%i\">"
+						        "<input type=\"submit\" value=\" Load \">"
+						      "</td>"
+						    "</form>"
+						  "</td>>"
+						"</tr>",
+						slot, tmp_name, pid, tmp_filename, slot);
+			}
+			strcat(buffer, templn);
+		}
 	}
 
 	sprintf(templn, "%s", "</table><br>");
@@ -9078,7 +9265,7 @@ static void handleclient(u64 conn_s_p)
 			}
 			else
 			{   // cobra spoofer not working on 4.53 & 4.65
-    			if((c_firmware!=4.53f && c_firmware<4.65f))
+    			if((c_firmware!=4.53f && c_firmware!=4.65f))
 				{
 					cobra_config->spoof_version=0x0475;
 					cobra_config->spoof_revision=65242;
@@ -9265,6 +9452,7 @@ quit:
 				sys_ppu_thread_exit(0);
 				break;
 			}
+
 			if(strstr(param, "shutdown.ps3"))
 			{
 				http_response(conn_s, header, param, 200, param);
@@ -9386,6 +9574,7 @@ mobile_response:
 							strstr(param, "syscall8.ps3mapi") ||
 							strstr(param, "setidps.ps3mapi")   ||
 							strstr(param, "vshplugin.ps3mapi")   ||
+							strstr(param, "gameplugin.ps3mapi")   ||
 #endif
 
 #ifdef COPY_PS3
@@ -9423,7 +9612,7 @@ mobile_response:
 					strstr(param, "eject.ps3")   ||
 					strstr(param, "insert.ps3"))
 				is_binary=0;
-			else if(param[1]=='n' && param[2]=='e' && param[3]=='t' && (param[3]>='0' && param[4]<='2')) //net0/net1/net2
+			else if(param[1]=='n' && param[2]=='e' && param[3]=='t' && (param[4]>='0' && param[4]<='2')) //net0/net1/net2
 			{
 				is_binary=2; small_alloc = false;
 			}
@@ -9887,6 +10076,11 @@ bgm_status:
 					if(strstr(param, "vshplugin.ps3mapi"))
 					{
 						ps3mapi_vshplugin(buffer, templn, param);
+					}
+					else
+					if(strstr(param,"gameplugin.ps3mapi"))
+					{
+						ps3mapi_gameplugin(buffer, templn, param);
 					}
 #endif
 
@@ -11289,8 +11483,8 @@ static void poll_thread(uint64_t poll)
 
 #ifdef EXT_GDATA
 							set_gamedata_status(extgd^1, true);
-							sys_timer_sleep(2);
 #endif
+							sys_timer_sleep(2);
 							break;
 						}
 						else
@@ -11499,14 +11693,14 @@ static void poll_thread(uint64_t poll)
 									if(!webman_config->fanc)
 									{
 										backup[5]=peekq(get_fan_policy_offset);
-										lv2poke32(get_fan_policy_offset, 0x38600001); // sys 409 get_fan_policy  4.55/4.60/4.65
+										lv2poke32(get_fan_policy_offset, 0x38600001); // sys 409 get_fan_policy  4.55/4.60/4.65/4.70/4.75
 									}
 
 									sys_sm_get_fan_policy(0, &st, &mode, &speed, &unknown);
 
 									if(!webman_config->fanc)
 									{
-										pokeq(get_fan_policy_offset, backup[5]); // sys 409 get_fan_policy  4.55/4.60/4.65
+										pokeq(get_fan_policy_offset, backup[5]); // sys 409 get_fan_policy  4.55/4.60/4.65/4.70/4.75
 									}
 								}
 								_meminfo meminfo;
@@ -11526,8 +11720,7 @@ static void poll_thread(uint64_t poll)
 
 								char cfw_info[20];
 #ifdef COBRA_ONLY
-								#define SYSCALL8_OPCODE_GET_MAMBA           0x7FFFULL
-								bool is_mamba; {system_call_1(8, SYSCALL8_OPCODE_GET_MAMBA); is_mamba = ((int)p1 ==0x666);}
+								bool is_mamba; {system_call_1(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_GET_MAMBA); is_mamba = ((int)p1 ==0x666);}
 
 								uint16_t cobra_version; sys_get_version2(&cobra_version);
 								sprintf(cfw_info, "%s %s: %X.%X", dex_mode ? "DEX" : "CEX", is_mamba ? "Mamba" : "Cobra", cobra_version>>8, (cobra_version & 0xF) ? (cobra_version & 0xFF) : ((cobra_version>>4) & 0xF));
@@ -12105,7 +12298,7 @@ static void restore_fan(u8 set_ps2_temp)
 		else sys_sm_set_fan_policy(0, 1, 0x0); //syscon
 
 		pokeq(set_fan_policy_offset, backup[4]);  // sys 389 set_fan_policy
-		pokeq(get_fan_policy_offset, backup[5]);  // sys 409 get_fan_policy  4.55/4.60/4.65
+		pokeq(get_fan_policy_offset, backup[5]);  // sys 409 get_fan_policy  4.55/4.60/4.65/4.70/4.75
 
 		backup[0]=0;
 	}
@@ -12128,7 +12321,7 @@ static void fan_control(u8 temp0, u8 initial)
 
 				backup[4]=peekq(set_fan_policy_offset);
 				backup[5]=peekq(get_fan_policy_offset);
-				lv2poke32(get_fan_policy_offset, 0x38600001); // sys 409 get_fan_policy  4.55/4.60/4.65
+				lv2poke32(get_fan_policy_offset, 0x38600001); // sys 409 get_fan_policy  4.55/4.60/4.65/4.70/4.75
 				lv2poke32(set_fan_policy_offset, 0x38600001); // sys 389 set_fan_policy
 
 			    sys_sm_set_fan_policy(0, 2, 0x33);
@@ -12207,7 +12400,7 @@ static void reset_settings()
 	//webman_config->nopad=0;      //enable all PAD shortcuts
 	//webman_config->nocov=0;      //enable multiMAN covers
 
-	webman_config->fanc=1;       //fan control enabled
+	webman_config->fanc=0;       //fan control disabled
 	//webman_config->temp0=0;      //auto
 	webman_config->temp1=MY_TEMP;
 	webman_config->manu=35;      //manual temp
@@ -12323,6 +12516,17 @@ static void set_buffer_sizes(int footprint)
 		BUFFER_SIZE_ALL = ( 512*KB);
 		BUFFER_SIZE_FTP	= ( _128KB_);
 		//BUFFER_SIZE	= ( 320*KB);
+		BUFFER_SIZE_PSX	= (  _32KB_);
+		BUFFER_SIZE_PSP	= (  _32KB_);
+		BUFFER_SIZE_PS2	= (  _64KB_);
+		BUFFER_SIZE_DVD	= (  _64KB_);
+	}
+	else
+	if(footprint==4) //MAX+
+	{
+		BUFFER_SIZE_ALL = ( 1280*KB);
+		BUFFER_SIZE_FTP	= ( _128KB_);
+		//BUFFER_SIZE	= ( 1088*KB);
 		BUFFER_SIZE_PSX	= (  _32KB_);
 		BUFFER_SIZE_PSP	= (  _32KB_);
 		BUFFER_SIZE_PS2	= (  _64KB_);
@@ -12458,14 +12662,14 @@ static void handleclient_ps3mapi(u64 conn_s_ps3mapi_p)
 					if(strcasecmp(cmd, "GETVERSION") == 0)
 					{
 						int version = 0;
-						{ system_call_2(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_CORE_VERSION); version = (int)(p1); }
+						{ system_call_2(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_CORE_VERSION); version = (int)(p1); }
 						sprintf(buffer, "200 %i\r\n", version);
 						ssend(conn_s_ps3mapi, buffer);
 					}
 					else if(strcasecmp(cmd, "GETMINVERSION") == 0)
 					{
 						int version = 0;
-						{ system_call_2(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_CORE_MINVERSION); version = (int)(p1); }
+						{ system_call_2(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_CORE_MINVERSION); version = (int)(p1); }
 						sprintf(buffer, "200 %i\r\n", version);
 						ssend(conn_s_ps3mapi, buffer);
 					}
@@ -12516,14 +12720,14 @@ static void handleclient_ps3mapi(u64 conn_s_ps3mapi_p)
 					else if(strcasecmp(cmd, "GETFWVERSION") == 0)
 					{
 						int version = 0;
-						{system_call_2(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_FW_VERSION); version = (int)(p1); }
+						{system_call_2(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_FW_VERSION); version = (int)(p1); }
 						sprintf(buffer, "200 %i\r\n", version);
 						ssend(conn_s_ps3mapi, buffer);
 					}
 					else if(strcasecmp(cmd, "GETFWTYPE") == 0)
 					{
 						memset(param2, 0, sizeof(param2));
-						{system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_FW_TYPE, (u64)(u32)param2); }
+						{system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_FW_TYPE, (u64)(u32)param2); }
 						sprintf(buffer, "200 %s\r\n", param2);
 						ssend(conn_s_ps3mapi, buffer);
 					}
@@ -12583,7 +12787,7 @@ static void handleclient_ps3mapi(u64 conn_s_ps3mapi_p)
 						if(split == 1)
 						{
 							int num = val(param2);
-							{ system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, (u64)num); }
+							{ system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_DISABLE_SYSCALL, (u64)num); }
 							ssend(conn_s_ps3mapi, PS3MAPI_OK_200);
 						}
 						else ssend(conn_s_ps3mapi, PS3MAPI_ERROR_501);
@@ -12594,7 +12798,7 @@ static void handleclient_ps3mapi(u64 conn_s_ps3mapi_p)
 						{
 							int num = val(param2);
 							int check = 0;
-							{ system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_CHECK_SYSCALL, (u64)num); check = (int)(p1); }
+							{ system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_CHECK_SYSCALL, (u64)num); check = (int)(p1); }
 							sprintf(buffer, "200 %i\r\n", check);
 							ssend(conn_s_ps3mapi, buffer);
 						}
@@ -12605,7 +12809,7 @@ static void handleclient_ps3mapi(u64 conn_s_ps3mapi_p)
 						if(split == 1)
 						{
 							int mode = val(param2);
-							{ system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_PDISABLE_SYSCALL8, (u64)mode); }
+							{ system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_PDISABLE_SYSCALL8, (u64)mode); }
 							ssend(conn_s_ps3mapi, PS3MAPI_OK_200);
 						}
 						else ssend(conn_s_ps3mapi, PS3MAPI_ERROR_501);
@@ -12613,7 +12817,7 @@ static void handleclient_ps3mapi(u64 conn_s_ps3mapi_p)
 					else if(strcasecmp(cmd, "PCHECKSYSCALL8") == 0)
 					{
 						int check = 0;
-						{ system_call_2(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_PCHECK_SYSCALL8); check = (int)(p1); }
+						{ system_call_2(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_PCHECK_SYSCALL8); check = (int)(p1); }
 						sprintf(buffer, "200 %i\r\n", check);
 						ssend(conn_s_ps3mapi, buffer);
 					}
@@ -12629,13 +12833,13 @@ static void handleclient_ps3mapi(u64 conn_s_ps3mapi_p)
 					}
 					else if(strcasecmp(cmd, "REMOVEHOOK") == 0)
 					{
-						{ system_call_2(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_REMOVE_HOOK); }
+						{ system_call_2(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_REMOVE_HOOK); }
 						ssend(conn_s_ps3mapi, PS3MAPI_OK_200);
 					}
 					else if(strcasecmp(cmd, "GETIDPS") == 0)
 					{
 						u64 _new_idps[2] = { 0, 0};
-						{ system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_IDPS, (u64)(u32)_new_idps);}
+						{ system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_IDPS, (u64)(u32)_new_idps);}
 						sprintf(buffer, "200 %016llX%016llX\r\n", _new_idps[0], _new_idps[1]);
 						ssend(conn_s_ps3mapi, buffer);
 					}
@@ -12648,7 +12852,7 @@ static void handleclient_ps3mapi(u64 conn_s_ps3mapi_p)
 							{
 								u64 part1 = convertH(param1);
 								u64 part2 = convertH(param2);
-								{ system_call_4(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_SET_IDPS, part1, part2);}
+								{ system_call_4(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_SET_IDPS, part1, part2);}
 								ssend(conn_s_ps3mapi, PS3MAPI_OK_200);
 							}
 							else ssend(conn_s_ps3mapi, PS3MAPI_ERROR_501);
@@ -12658,7 +12862,7 @@ static void handleclient_ps3mapi(u64 conn_s_ps3mapi_p)
 					else if(strcasecmp(cmd, "GETPSID") == 0)
 					{
 						u64 _new_psid[2] = { 0, 0};
-						{ system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_PSID, (u64)(u32)_new_psid);}
+						{ system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_PSID, (u64)(u32)_new_psid);}
 						sprintf(buffer, "200 %016llX%016llX\r\n", _new_psid[0], _new_psid[1]);
 						ssend(conn_s_ps3mapi, buffer);
 					}
@@ -12671,7 +12875,7 @@ static void handleclient_ps3mapi(u64 conn_s_ps3mapi_p)
 							{
 								u64 part1 = convertH(param1);
 								u64 part2 = convertH(param2);
-								{ system_call_4(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_SET_PSID, (u64)part1, (u64)part2);}
+								{ system_call_4(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_SET_PSID, (u64)part1, (u64)part2);}
 								ssend(conn_s_ps3mapi, PS3MAPI_OK_200);
 							}
 							else ssend(conn_s_ps3mapi, PS3MAPI_ERROR_501);
@@ -12696,7 +12900,7 @@ static void handleclient_ps3mapi(u64 conn_s_ps3mapi_p)
 						{
 							u32 pid = val(param2);
 							memset(param2, 0, sizeof(param2));
-							{system_call_4(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_PROC_NAME_BY_PID, (u64)pid, (u64)(u32)param2); }
+							{system_call_4(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_PROC_NAME_BY_PID, (u64)pid, (u64)(u32)param2); }
 							sprintf(buffer, "200 %s\r\n", param2);
 							ssend(conn_s_ps3mapi, buffer);
 						}
@@ -12707,7 +12911,7 @@ static void handleclient_ps3mapi(u64 conn_s_ps3mapi_p)
 						u32 pid_list[16];
 						memset(buffer, 0, sizeof(buffer));
 						sprintf(buffer, "200 ");
-						{system_call_3(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_ALL_PROC_PID, (u64)(u32)pid_list); }
+						{system_call_3(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_ALL_PROC_PID, (u64)(u32)pid_list); }
 						for(int i = 0; i < 16; i++)
 						{
 							sprintf(buffer + strlen(buffer), "%i|", pid_list[i]);
@@ -12758,7 +12962,7 @@ static void handleclient_ps3mapi(u64 conn_s_ps3mapi_p)
 													if(size < BUFFER_SIZE_PS3MAPI) sizetoread = size;
 													while(0 < leftsize)
 													{
-														system_call_6(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_PROC_MEM, (u64)attached_pid, offset, (u64)(u32)buffer2, (u64)sizetoread);
+														system_call_6(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_PROC_MEM, (u64)attached_pid, offset, (u64)(u32)buffer2, (u64)sizetoread);
 														if(send(data_s, buffer2, sizetoread, 0)<0) { rr = -3; break; }
 														offset += sizetoread;
 														leftsize -= sizetoread;
@@ -12769,7 +12973,7 @@ static void handleclient_ps3mapi(u64 conn_s_ps3mapi_p)
 												}
 												else
 												{
-													system_call_6(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_PROC_MEM, (u64)attached_pid, (u64)offset, (u64)(u32)buffer2, (u64)size);
+													system_call_6(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_PROC_MEM, (u64)attached_pid, (u64)offset, (u64)(u32)buffer2, (u64)size);
 													if(send(data_s, buffer2, size, 0)<0) { rr = -3; break; }
 													break;
 												}
@@ -12811,7 +13015,7 @@ static void handleclient_ps3mapi(u64 conn_s_ps3mapi_p)
 										{
 											if((read_e = (u64)recv(data_s, buffer2, BUFFER_SIZE_PS3MAPI, MSG_WAITALL)) > 0)
 											{
-												system_call_6(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_SET_PROC_MEM, (u64)attached_pid, offset, (u64)(u32)buffer2, read_e);
+												system_call_6(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_SET_PROC_MEM, (u64)attached_pid, offset, (u64)(u32)buffer2, read_e);
 												offset += read_e;
 											}
 											else
@@ -12852,7 +13056,7 @@ static void handleclient_ps3mapi(u64 conn_s_ps3mapi_p)
 								u32 pid = val(param1);
 								s32 prxid = val(param2);
 								memset(param2, 0, sizeof(param2));
-								{system_call_5(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_PROC_MODULE_NAME, (u64)pid, (u64)prxid, (u64)(u32)param2); }
+								{system_call_5(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_PROC_MODULE_NAME, (u64)pid, (u64)prxid, (u64)(u32)param2); }
 								sprintf(buffer, "200 %s\r\n", param2);
 								ssend(conn_s_ps3mapi, buffer);
 							}
@@ -12870,7 +13074,7 @@ static void handleclient_ps3mapi(u64 conn_s_ps3mapi_p)
 								u32 pid = val(param1);
 								s32 prxid = val(param2);
 								memset(param2, 0, sizeof(param2));
-								{system_call_5(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_PROC_MODULE_FILENAME, (u64)pid, (u64)prxid, (u64)(u32)param2); }
+								{system_call_5(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_PROC_MODULE_FILENAME, (u64)pid, (u64)prxid, (u64)(u32)param2); }
 								sprintf(buffer, "200 %s\r\n", param2);
 								ssend(conn_s_ps3mapi, buffer);
 							}
@@ -12886,7 +13090,7 @@ static void handleclient_ps3mapi(u64 conn_s_ps3mapi_p)
 							u32 pid = val(param2);
 							memset(buffer, 0, sizeof(buffer));
 							sprintf(buffer, "200 ");
-							{system_call_4(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_ALL_PROC_MODULE_PID, (u64)pid, (u64)(u32)prxid_list); }
+							{system_call_4(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_ALL_PROC_MODULE_PID, (u64)pid, (u64)(u32)prxid_list); }
 							for(int i = 0; i < 128; i++)
 							{
 								sprintf(buffer + strlen(buffer), "%i|", prxid_list[i]);
@@ -12904,7 +13108,7 @@ static void handleclient_ps3mapi(u64 conn_s_ps3mapi_p)
 							if(split == 1)
 							{
 								u32 pid = val(param1);
-								{system_call_6(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_LOAD_PROC_MODULE, (u64)pid, (u64)(u32)param2, NULL, 0); }
+								{system_call_6(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_LOAD_PROC_MODULE, (u64)pid, (u64)(u32)param2, NULL, 0); }
 								ssend(conn_s_ps3mapi, PS3MAPI_OK_200);
 							}
 							else ssend(conn_s_ps3mapi, PS3MAPI_ERROR_501);
@@ -12920,7 +13124,7 @@ static void handleclient_ps3mapi(u64 conn_s_ps3mapi_p)
 							{
 								u32 pid = val(param1);
 								s32 prx_id = val(param2);
-								{system_call_4(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_UNLOAD_PROC_MODULE, (u64)pid, (u64)prx_id); }
+								{system_call_4(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_UNLOAD_PROC_MODULE, (u64)pid, (u64)prx_id); }
 								ssend(conn_s_ps3mapi, PS3MAPI_OK_200);
 							}
 							else ssend(conn_s_ps3mapi, PS3MAPI_ERROR_501);
@@ -12935,7 +13139,7 @@ static void handleclient_ps3mapi(u64 conn_s_ps3mapi_p)
 							if(split == 1)
 							{
 								unsigned int slot = val(param1);
-								if ( slot ) {{system_call_5(8, SYSCALL8_OPCODE_LOAD_VSH_PLUGIN, (u64)slot, (u64)(u32)param2, NULL, 0); }}
+								if( slot ) {{system_call_5(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_LOAD_VSH_PLUGIN, (u64)slot, (u64)(u32)param2, NULL, 0); }}
 								ssend(conn_s_ps3mapi, PS3MAPI_OK_200);
 							}
 						}
@@ -12946,7 +13150,7 @@ static void handleclient_ps3mapi(u64 conn_s_ps3mapi_p)
 						if(split == 1)
 						{
 							unsigned int slot = val(param2);
-							if ( slot ) {{system_call_2(8, SYSCALL8_OPCODE_UNLOAD_VSH_PLUGIN, (u64)slot); }}
+							if( slot ) {{system_call_2(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_UNLOAD_VSH_PLUGIN, (u64)slot); }}
 							ssend(conn_s_ps3mapi, PS3MAPI_OK_200);
 						}
 						else ssend(conn_s_ps3mapi, PS3MAPI_ERROR_501);
@@ -12958,7 +13162,7 @@ static void handleclient_ps3mapi(u64 conn_s_ps3mapi_p)
 							unsigned int slot = val(param2);
 							memset(param1, 0, sizeof(param1));
 							memset(param2, 0, sizeof(param2));
-							{system_call_5(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_VSH_PLUGIN_INFO, (u64)slot, (u64)(u32)param1, (u64)(u32)param2); }
+							{system_call_5(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_VSH_PLUGIN_INFO, (u64)slot, (u64)(u32)param1, (u64)(u32)param2); }
 							sprintf(buffer, "200 %s|%s\r\n", param1, param2);
 							ssend(conn_s_ps3mapi, buffer);
 						}
@@ -13051,7 +13255,7 @@ static void handleclient_ps3mapi(u64 conn_s_ps3mapi_p)
 static void ps3mapi_thread(u64 arg)
 {
 	int core_minversion = 0;
-	{ system_call_2(8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_CORE_MINVERSION); core_minversion = (int)(p1); }
+	{ system_call_2(SC_COBRA_SYSCALL8, SYSCALL8_OPCODE_PS3MAPI, PS3MAPI_OPCODE_GET_CORE_MINVERSION); core_minversion = (int)(p1); }
 	if((core_minversion !=0) &&(PS3MAPI_CORE_MINVERSION == core_minversion)) //Check if ps3mapi core has a compatible min_version.
 	{
 		int list_s = FAILED;
@@ -13589,7 +13793,6 @@ static bool mount_with_mm(const char *_path0, u8 do_eject)
 			sc_142=0x2FD810;
 #endif
 		}
-#ifndef COBRA_ONLY
         else
 		if(c_firmware==4.30f)
 		{
@@ -13604,9 +13807,11 @@ static bool mount_with_mm(const char *_path0, u8 do_eject)
 			pokeq(0x800000000005ABA4ULL, 0x2F83000060000000ULL );
 			pokeq(0x800000000005ABB8ULL, 0x2F83000060000000ULL );
 
+#ifndef COBRA_ONLY
 			sc_600=0x33D158; //35EEA0
 			sc_604=0x33D2C0; //35EEC0
 			sc_142=0x2FF460; //35E050
+#endif
 		}
         else
 		if(c_firmware==4.31f)
@@ -13621,9 +13826,11 @@ static bool mount_with_mm(const char *_path0, u8 do_eject)
 			pokeq(0x800000000005ABACULL, 0x60000000E8610188ULL );
 			pokeq(0x800000000005ABA0ULL, 0x600000005463063EULL );
 
+#ifndef COBRA_ONLY
 			sc_600=0x33D168;
 			sc_604=0x33D2D0;
 			sc_142=0x2FF470;
+#endif
 		}
         else
 		if(c_firmware==4.40f)
@@ -13638,9 +13845,11 @@ static bool mount_with_mm(const char *_path0, u8 do_eject)
 			pokeq(0x8000000000059AF0ULL, 0x2F83000060000000ULL );
 			pokeq(0x8000000000059B04ULL, 0x2F83000060000000ULL );
 
+#ifndef COBRA_ONLY
 			sc_600=0x33D720;
 			sc_604=0x33D888;
 			sc_142=0x2FF9E0;
+#endif
 		}
         else
 		if(c_firmware==4.41f)
@@ -13655,11 +13864,12 @@ static bool mount_with_mm(const char *_path0, u8 do_eject)
 			pokeq(0x8000000000059AF4ULL, 0x2F83000060000000ULL );
 			pokeq(0x8000000000059B08ULL, 0x2F83000060000000ULL );
 
+#ifndef COBRA_ONLY
 			sc_600=0x33D730;
 			sc_604=0x33D898;
 			sc_142=0x2FF9F0;
-		}
 #endif
+		}
         else
 		if(c_firmware==4.46f)
 		{
@@ -13911,7 +14121,6 @@ static bool mount_with_mm(const char *_path0, u8 do_eject)
 			sc_142=0x318BA0;
 #endif
 		}
-#ifndef COBRA_ONLY
 		else
 		if(c_firmware==4.30f)
 		{
@@ -13925,9 +14134,11 @@ static bool mount_with_mm(const char *_path0, u8 do_eject)
 			pokeq(0x800000000005E4BCULL, 0x2F83000060000000ULL );
 			pokeq(0x800000000005E4D0ULL, 0x2F83000060000000ULL );
 
+#ifndef COBRA_ONLY
 			sc_600=0x35A220;
 			sc_604=0x35A2F8;
 			sc_142=0x31A7A0;
+#endif
 		}
 		else
 		if(c_firmware==4.41f)
@@ -13942,11 +14153,12 @@ static bool mount_with_mm(const char *_path0, u8 do_eject)
 			pokeq(0x800000000005D40CULL, 0x2F83000060000000ULL );
 			pokeq(0x800000000005D420ULL, 0x2F83000060000000ULL );
 
+#ifndef COBRA_ONLY
 			sc_600=0x35AB40;
 			sc_604=0x35AC18;
 			sc_142=0x31B060;
-		}
 #endif
+		}
 		else
 		if(c_firmware==4.46f)
 		{
@@ -13966,7 +14178,6 @@ static bool mount_with_mm(const char *_path0, u8 do_eject)
 			sc_142=0x31B5C8;
 #endif
 		}
-#ifndef COBRA_ONLY
 		else
 		if(c_firmware==4.50f)
 		{
@@ -13980,11 +14191,12 @@ static bool mount_with_mm(const char *_path0, u8 do_eject)
 			pokeq(0x800000000005D4C0ULL, 0x2F83000060000000ULL );
 			pokeq(0x800000000005D4D4ULL, 0x2F83000060000000ULL );
 
+#ifndef COBRA_ONLY
 			sc_600=0x35EA90;
 			sc_604=0x35EB68;
 			sc_142=0x322B38;
-		}
 #endif
+		}
 		else
 		if(c_firmware==4.53f)
 		{
@@ -14004,7 +14216,6 @@ static bool mount_with_mm(const char *_path0, u8 do_eject)
 			sc_142=0x3242F0; //0x385108 + 142*8 = 00385578 -> 80 00 00 00 00 32 42 F0
 #endif
 		}
-#ifndef COBRA_ONLY
         else
 		if(c_firmware==4.55f)
 		{
@@ -14018,11 +14229,37 @@ static bool mount_with_mm(const char *_path0, u8 do_eject)
 			pokeq(0x800000000005DCB8ULL, 0x2F83000060000000ULL );
             pokeq(0x800000000005DCD0ULL, 0x2F83000060000000ULL );
 
+#ifndef COBRA_ONLY
 			sc_600=0x3634F8; //0x388488 + 600*8 = 00389748 -> 80 00 00 00 00 36 34 F8
 			sc_604=0x3635D0; //0x388488 + 604*8 = 00389768 -> 80 00 00 00 00 36 35 D0
 			sc_142=0x327348; //0x388488 + 142*8 = 003888F8 -> 80 00 00 00 00 32 73 48
-		}
 #endif
+		}
+		else
+		if(c_firmware==4.60f)
+		{
+			pokeq(0x80000000002764F0ULL, 0x4E80002038600000ULL ); // fix 8001003C error
+			pokeq(0x80000000002764F8ULL, 0x7C6307B44E800020ULL ); // fix 8001003C error
+			pokeq(0x8000000000059F58ULL, 0x63FF003D60000000ULL ); // fix 8001003D error
+			pokeq(0x800000000005A01CULL, 0x3FE080013BE00000ULL ); // fix 8001003E error
+
+			pokeq(0x8000000000059FC8ULL, 0x419E00D860000000ULL );
+			pokeq(0x8000000000059FD0ULL, 0x2F84000448000098ULL );
+			pokeq(0x800000000005E020ULL, 0x2F83000060000000ULL );
+			pokeq(0x800000000005E038ULL, 0x2F83000060000000ULL );
+
+			pokeq(0x8000000000059BFCULL, 0x386000012F830000ULL ); // ignore LIC.DAT check
+			pokeq(0x80000000002367C4ULL, 0x38600000F8690000ULL ); // fix 0x8001002B / 80010017 errors (ported for DEX 2015-01-03)
+
+			pokeq(0x8000000000059628ULL, 0xF821FE917C0802A6ULL ); // just restore the original
+			pokeq(0x800000000005C77CULL, 0x419E0038E8610098ULL ); // just restore the original
+
+#ifndef COBRA_ONLY
+			sc_600=0x364DE0; //0x38A120 + 600*8 = 0038B3E0 -> 80 00 00 00 00 36 4D E0
+			sc_604=0x364EB8; //0x38A120 + 604*8 = 0038B400 -> 80 00 00 00 00 36 4E B8
+			sc_142=0x328E70; //0x38A120 + 142*8 = 0038A590 -> 80 00 00 00 00 32 8E 70
+#endif
+		}
 		else
 		if(c_firmware==4.65f || c_firmware==4.66f)
 		{
@@ -14104,6 +14341,32 @@ static bool mount_with_mm(const char *_path0, u8 do_eject)
 			sc_600=0x3647B8; //0x38A368 + 600*8 = 0038B628 -> 80 00 00 00 00 36 47 B8
 			sc_604=0x364890; //0x38A368 + 604*8 = 0038B648 -> 80 00 00 00 00 36 48 90
 			sc_142=0x329190; //0x38A368 + 142*8 = 0038A7D8 -> 80 00 00 00 00 32 91 90
+#endif
+		}
+		else
+		if(c_firmware==4.75f)
+		{
+			//patches by deank
+			pokeq(0x800000000026D868ULL, 0x4E80002038600000ULL ); // fix 8001003C error  Original: 0x4E8000208003026CULL
+			pokeq(0x800000000026D870ULL, 0x7C6307B44E800020ULL ); // fix 8001003C error  Original: 0x3D6000473D201B43ULL
+            pokeq(0x8000000000059F5CULL, 0x63FF003D60000000ULL ); // fix 8001003D error  Original: 0x63FF003D419EFFD4ULL
+			pokeq(0x800000000005A020ULL, 0x3FE080013BE00000ULL ); // fix 8001003E error  Original: 0x3FE0800163FF003EULL
+
+			pokeq(0x8000000000059FCCULL, 0x419E00D860000000ULL ); // Original: 0x419E00D8419D00C0ULL
+			pokeq(0x8000000000059FD4ULL, 0x2F84000448000098ULL ); // Original: 0x2F840004409C0048ULL //PATCH_JUMP
+			pokeq(0x800000000005E0B0ULL, 0x2F83000060000000ULL ); // fix 80010009 error  Original: 0x2F830000419E00ACULL
+			pokeq(0x800000000005E0C4ULL, 0x2F83000060000000ULL ); // fix 80010009 error  Original: 0x2F830000419E00ACULL
+
+			pokeq(0x8000000000059C00ULL, 0x386000012F830000ULL ); // ignore LIC.DAT check
+			pokeq(0x800000000022DAD0ULL, 0x38600000F8690000ULL ); // fix 0x8001002B / 80010017 errors (2015-08-14)
+
+			pokeq(0x800000000005962CULL, 0xF821FE917C0802A6ULL ); // just restore the original
+			pokeq(0x800000000005C7ECULL, 0x419E0038E8610098ULL ); // just restore the original
+			
+#ifndef COBRA_ONLY
+			sc_600=0x364848; //0x38A3E8 + 600*8 = 0038B6A8 -> 80 00 00 00 00 36 48 48
+			sc_604=0x364920; //0x38A3E8 + 604*8 = 0038B6C8 -> 80 00 00 00 00 36 49 20
+			sc_142=0x329220; //0x38A3E8 + 142*8 = 0038A858 -> 80 00 00 00 00 32 92 20
 #endif
 		}
 	}
@@ -15225,6 +15488,9 @@ exit_mount:
 	{
 		if(ret && (strstr(_path, ".PUP.ntfs[BD") || cellFsStat((char*)"/dev_bdvd/PS3UPDAT.PUP", &s)==CELL_FS_SUCCEEDED))
 			sys_map_path((char*)"/dev_bdvd/PS3/UPDATE", (char*)"/dev_bdvd"); //redirect root of bdvd to /dev_bdvd/PS3/UPDATE
+
+		if(ret && (strstr(_path, "/net") && cellFsStat((char*)"/dev_bdvd/PKG", &s)==CELL_FS_SUCCEEDED))
+			sys_map_path((char*)"/app_home", (char*)"/dev_bdvd/PKG"); //redirect net_host/PKG to app_home
 
 		sys_map_path((char*)"/dev_bdvd/PS3_UPDATE", (char*)"/dev_bdvd"); //redirect firmware update to root of bdvd
 	}
